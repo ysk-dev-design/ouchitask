@@ -1,0 +1,13 @@
+{
+  "name": "おうちタスク",
+  "short_name": "おうちタスク",
+  "description": "家族で使えるタスク管理アプリ",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#2D3748",
+  "theme_color": "#2D3748",
+  "orientation": "any",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
