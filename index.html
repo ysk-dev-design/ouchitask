@@ -10,430 +10,547 @@
   <title>おうちタスク</title>
   <link rel="manifest" href="manifest.json">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, sans-serif; background: #F4F6FA; }
-    #root { min-height: 100vh; }
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    body { font-family:-apple-system,'Hiragino Sans',sans-serif; background:#F4F6FA; }
+    #root { min-height:100vh; }
+    .toast { position:fixed; bottom:32px; left:50%; transform:translateX(-50%) translateY(20px); background:#2D3748; color:#fff; padding:10px 24px; border-radius:99px; font-size:14px; font-weight:600; box-shadow:0 4px 16px rgba(0,0,0,0.2); white-space:nowrap; z-index:300; opacity:0; transition:opacity 0.3s, transform 0.3s; pointer-events:none; }
+    .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   </style>
 </head>
 <body>
-  <div id="root"></div>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/recharts/2.8.0/Recharts.js"></script>
-  <script type="text/babel" data-presets="react">
-    const { useState, useEffect } = React;
-    const { AreaChart, Area, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } = Recharts;
+<div id="root"></div>
+<div class="toast" id="toast"></div>
 
-    const STORAGE_KEY = "ouchitask-v3";
+<script>
+const STORAGE_KEY = "ouchitask-v3";
 
-    const DEFAULT_DATA = [
-      {
-        id: "g1", name: "室内", icon: "🏠",
-        tasks: [
-          { id: "t1", name: "トイレ掃除", icon: "🚽", intervalDays: 7, history: [] },
-          { id: "t2", name: "風呂掃除", icon: "🛁", intervalDays: 7, history: [] },
-          { id: "t3", name: "掃除機", icon: "🧹", intervalDays: 3, history: [] },
-        ]
-      },
-      {
-        id: "g2", name: "室外・車", icon: "🚗",
-        tasks: [
-          { id: "t4", name: "洗車", icon: "🚗", intervalDays: 30, history: [] },
-          { id: "t5", name: "ゴミ出し確認", icon: "🗑️", intervalDays: 7, history: [] },
-        ]
-      },
-      {
-        id: "g3", name: "身の回り", icon: "✂️",
-        tasks: [
-          { id: "t6", name: "散髪", icon: "✂️", intervalDays: 42, history: [] },
-        ]
+const DEFAULT_DATA = [
+  { id:"g1", name:"室内", icon:"🏠", tasks:[
+    { id:"t1", name:"トイレ掃除", icon:"🚽", intervalDays:7, history:[] },
+    { id:"t2", name:"風呂掃除", icon:"🛁", intervalDays:7, history:[] },
+    { id:"t3", name:"掃除機", icon:"🧹", intervalDays:3, history:[] },
+  ]},
+  { id:"g2", name:"室外・車", icon:"🚗", tasks:[
+    { id:"t4", name:"洗車", icon:"🚗", intervalDays:30, history:[] },
+    { id:"t5", name:"ゴミ出し確認", icon:"🗑️", intervalDays:7, history:[] },
+  ]},
+  { id:"g3", name:"身の回り", icon:"✂️", tasks:[
+    { id:"t6", name:"散髪", icon:"✂️", intervalDays:42, history:[] },
+  ]},
+];
+
+// ── ユーティリティ ──
+function today() { return new Date().toISOString().split("T")[0]; }
+function daysSince(str) {
+  if (!str) return null;
+  const d = new Date(str); d.setHours(0,0,0,0);
+  const n = new Date(); n.setHours(0,0,0,0);
+  return Math.floor((n - d) / 86400000);
+}
+function getStatus(days, interval) {
+  if (days === null) return "none";
+  if (days >= interval) return "over";
+  if (days >= interval * 0.65) return "warn";
+  return "good";
+}
+function fmtDate(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return `${d.getMonth()+1}/${d.getDate()}`;
+}
+function fmtDateLong(str) {
+  if (!str) return null;
+  const d = new Date(str);
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
+}
+function uid() { return Math.random().toString(36).slice(2,9); }
+function lastDone(task) {
+  if (!task.history || !task.history.length) return null;
+  return [...task.history].sort().slice(-1)[0];
+}
+
+const STATUS = {
+  good:{ bar:"#4CAF50", bg:"#E8F5E9", text:"#2E7D32", label:"良好" },
+  warn:{ bar:"#FF9800", bg:"#FFF3E0", text:"#E65100", label:"もうすぐ" },
+  over:{ bar:"#F44336", bg:"#FFEBEE", text:"#B71C1C", label:"超過" },
+  none:{ bar:"#BDBDBD", bg:"#F5F5F5", text:"#757575", label:"未実施" },
+};
+
+// ── データ管理 ──
+let groups = [];
+function loadGroups() {
+  try {
+    const s = localStorage.getItem(STORAGE_KEY);
+    if (s) {
+      const parsed = JSON.parse(s);
+      groups = parsed.map(g => ({ ...g, tasks: g.tasks.map(t => ({ ...t, history: t.history || (t.lastDone ? [t.lastDone] : []) })) }));
+      return;
+    }
+  } catch {}
+  groups = JSON.parse(JSON.stringify(DEFAULT_DATA));
+}
+function saveGroups() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(groups)); } catch {}
+}
+
+// ── トースト ──
+let toastTimer;
+function showToast(msg) {
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
+}
+
+// ── グラフ（Canvas版） ──
+function buildChartData(task) {
+  const hist = new Set(task.history || []);
+  const sorted = [...hist].sort();
+  if (!sorted.length) return [];
+  const data = [];
+  let count = 0;
+  const end = new Date();
+  const start = new Date(sorted[0]);
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
+    const ds = d.toISOString().split("T")[0];
+    if (hist.has(ds)) { count = 0; } else { count++; }
+    data.push({ date:ds, label:fmtDate(ds), days:count, done:hist.has(ds) });
+  }
+  return data;
+}
+
+function drawChart(canvas, task) {
+  const data = buildChartData(task);
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+  const pad = { top:16, right:24, bottom:28, left:32 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (data.length < 2) {
+    ctx.fillStyle = "#BDBDBD";
+    ctx.font = "13px -apple-system,sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("記録が2件以上になるとグラフが表示されます", W/2, H/2);
+    return;
+  }
+
+  const maxY = Math.max(...data.map(d => d.days), task.intervalDays) * 1.1;
+  const xStep = cW / (data.length - 1);
+
+  function xp(i) { return pad.left + i * xStep; }
+  function yp(v) { return pad.top + cH - (v / maxY) * cH; }
+
+  // グリッド・Y軸ラベル
+  ctx.strokeStyle = "#F0F0F0";
+  ctx.lineWidth = 1;
+  [0, 0.25, 0.5, 0.75, 1].forEach(r => {
+    const y = pad.top + cH * (1 - r);
+    const val = Math.round(maxY * r);
+    ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + cW, y); ctx.stroke();
+    ctx.fillStyle = "#AAA"; ctx.font = "9px sans-serif"; ctx.textAlign = "right";
+    ctx.fillText(val, pad.left - 4, y + 3);
+  });
+
+  // 目安ライン
+  const refY = yp(task.intervalDays);
+  ctx.strokeStyle = "#F44336"; ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 3]);
+  ctx.beginPath(); ctx.moveTo(pad.left, refY); ctx.lineTo(pad.left + cW, refY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = "#F44336"; ctx.font = "9px sans-serif"; ctx.textAlign = "left";
+  ctx.fillText("目安", pad.left + cW + 2, refY + 3);
+
+  // エリア塗り
+  ctx.beginPath();
+  ctx.moveTo(xp(0), yp(data[0].days));
+  data.forEach((d, i) => { if (i > 0) ctx.lineTo(xp(i), yp(d.days)); });
+  ctx.lineTo(xp(data.length-1), pad.top + cH);
+  ctx.lineTo(xp(0), pad.top + cH);
+  ctx.closePath();
+  const grad = ctx.createLinearGradient(0, pad.top, 0, pad.top + cH);
+  grad.addColorStop(0, "rgba(92,107,192,0.18)");
+  grad.addColorStop(1, "rgba(92,107,192,0)");
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // ライン
+  ctx.beginPath();
+  ctx.strokeStyle = "#5C6BC0"; ctx.lineWidth = 2;
+  data.forEach((d, i) => { i === 0 ? ctx.moveTo(xp(i), yp(d.days)) : ctx.lineTo(xp(i), yp(d.days)); });
+  ctx.stroke();
+
+  // 実施日ドット
+  data.forEach((d, i) => {
+    if (d.done) {
+      ctx.beginPath();
+      ctx.arc(xp(i), yp(d.days), 5, 0, Math.PI*2);
+      ctx.fillStyle = "#5C6BC0"; ctx.fill();
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke();
+    }
+  });
+
+  // X軸ラベル（間引き）
+  ctx.fillStyle = "#AAA"; ctx.font = "9px sans-serif"; ctx.textAlign = "center";
+  const step = Math.max(1, Math.floor(data.length / 6));
+  data.forEach((d, i) => {
+    if (i % step === 0 || i === data.length-1) {
+      ctx.fillText(d.label, xp(i), H - 4);
+    }
+  });
+}
+
+// ── 画面状態 ──
+let currentView = "main"; // "main" | "chart"
+let chartTaskId = null;
+let confirmingId = null;
+let modalType = null;
+let formData = {};
+let showMenu = false;
+let collapsedGroups = {};
+
+// ── レンダリング ──
+function render() {
+  const root = document.getElementById("root");
+  if (currentView === "chart") {
+    root.innerHTML = renderChartScreen();
+    const task = findTask(chartTaskId);
+    if (task) {
+      const canvas = document.getElementById("chart-canvas");
+      if (canvas) {
+        canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+        canvas.height = 200 * window.devicePixelRatio;
+        canvas.style.height = "200px";
+        ctx = canvas.getContext("2d");
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+        drawChart(canvas, task);
       }
-    ];
-
-    function today() { return new Date().toISOString().split("T")[0]; }
-    function daysSince(str) {
-      if (!str) return null;
-      const d = new Date(str); d.setHours(0,0,0,0);
-      const n = new Date(); n.setHours(0,0,0,0);
-      return Math.floor((n - d) / 86400000);
     }
-    function getStatus(days, interval) {
-      if (days === null) return "none";
-      if (days >= interval) return "over";
-      if (days >= interval * 0.65) return "warn";
-      return "good";
-    }
-    function fmtDate(str) {
-      if (!str) return null;
-      const d = new Date(str);
-      return `${d.getMonth()+1}/${d.getDate()}`;
-    }
-    function fmtDateLong(str) {
-      if (!str) return null;
-      const d = new Date(str);
-      return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日`;
-    }
-    function uid() { return Math.random().toString(36).slice(2, 9); }
-    function lastDone(task) {
-      if (!task.history || !task.history.length) return null;
-      return [...task.history].sort().slice(-1)[0];
-    }
+  } else {
+    root.innerHTML = renderMain();
+  }
+  if (modalType) {
+    root.innerHTML += renderModal();
+  }
+}
 
-    const STATUS = {
-      good: { bar: "#4CAF50", bg: "#E8F5E9", text: "#2E7D32" },
-      warn: { bar: "#FF9800", bg: "#FFF3E0", text: "#E65100" },
-      over: { bar: "#F44336", bg: "#FFEBEE", text: "#B71C1C" },
-      none: { bar: "#BDBDBD", bg: "#F5F5F5", text: "#757575" },
-    };
+function findTask(id) {
+  for (const g of groups) { const t = g.tasks.find(t => t.id === id); if (t) return t; }
+  return null;
+}
+function findGroup(id) { return groups.find(g => g.id === id); }
 
-    function buildChartData(task) {
-      const hist = new Set(task.history || []);
-      const sorted = [...hist].sort();
-      if (!sorted.length) return [];
-      const data = [];
-      let count = 0;
-      const end = new Date();
-      const start = new Date(sorted[0]);
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dateStr = d.toISOString().split("T")[0];
-        if (hist.has(dateStr)) { count = 0; } else { count++; }
-        data.push({ date: dateStr, label: fmtDate(dateStr), days: count, done: hist.has(dateStr) });
-      }
-      return data;
-    }
+// ── メイン画面 ──
+function renderMain() {
+  const now = new Date();
+  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${"日月火水木金土"[now.getDay()]}）`;
+  const totalAlert = groups.reduce((acc,g) => acc + g.tasks.filter(t => { const d=daysSince(lastDone(t)); return d===null||d>=t.intervalDays; }).length, 0);
 
-    function Modal({ title, onClose, children }) {
-      return (
-        React.createElement('div', { style: { position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:200, display:"flex", alignItems:"flex-end" }, onClick: onClose },
-          React.createElement('div', { onClick: e => e.stopPropagation(), style: { width:"100%", background:"#fff", borderRadius:"20px 20px 0 0", padding:"24px 20px 36px", maxHeight:"85vh", overflowY:"auto" }},
-            React.createElement('div', { style: { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 }},
-              React.createElement('span', { style: { fontSize:16, fontWeight:700, color:"#1a1a2e" }}, title),
-              React.createElement('button', { onClick: onClose, style: { background:"none", border:"none", fontSize:20, cursor:"pointer", color:"#999" }}, "✕")
-            ),
-            children
-          )
-        )
-      );
-    }
+  let html = `
+  <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:28px 20px 18px;color:#fff;position:relative;">
+    <div style="font-size:11px;opacity:0.55;letter-spacing:1.5px;margin-bottom:4px;">${dateLabel}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <div style="font-size:22px;font-weight:700;">おうちタスク</div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${totalAlert > 0 ? `<div style="background:#F44336;color:#fff;border-radius:99px;font-size:12px;font-weight:700;padding:3px 10px;">${totalAlert}件要対応</div>` : ""}
+        <button onclick="toggleMenu()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer;">⋮</button>
+      </div>
+    </div>
+    <div style="font-size:11px;opacity:0.45;margin-top:4px;">タスク名タップでグラフ・履歴編集</div>
+    ${showMenu ? `
+    <div onclick="toggleMenu()" style="position:fixed;inset:0;z-index:100;">
+      <div onclick="event.stopPropagation()" style="position:absolute;top:80px;right:16px;background:#fff;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,0.15);overflow:hidden;min-width:190px;z-index:101;">
+        <button onclick="exportData()" style="width:100%;padding:14px 18px;border:none;background:none;font-size:14px;cursor:pointer;font-family:inherit;text-align:left;color:#333;border-bottom:1px solid #F0F0F0;">📤 データをエクスポート</button>
+        <label style="display:flex;align-items:center;padding:14px 18px;font-size:14px;cursor:pointer;color:#333;">
+          📥 データをインポート
+          <input type="file" accept=".json" onchange="importData(event)" style="display:none;">
+        </label>
+      </div>
+    </div>` : ""}
+  </div>
+  <div style="padding:14px 12px 80px;">`;
 
-    function InputField({ label, ...props }) {
-      return React.createElement('div', { style: { marginBottom:14 }},
-        label && React.createElement('div', { style: { fontSize:12, color:"#888", marginBottom:4, fontWeight:600 }}, label),
-        React.createElement('input', { ...props, style: { width:"100%", padding:"11px 14px", borderRadius:10, border:"1.5px solid #E0E0E0", fontSize:15, fontFamily:"inherit", outline:"none", boxSizing:"border-box", ...(props.style||{}) }})
-      );
-    }
+  groups.forEach(g => { html += renderGroup(g); });
 
-    function PrimaryBtn({ children, ...props }) {
-      return React.createElement('button', { ...props, style: { width:"100%", padding:"13px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#5C6BC0,#7E57C2)", color:"#fff", fontSize:15, fontWeight:700, cursor:"pointer", fontFamily:"inherit", marginTop:4 }}, children);
-    }
+  html += `
+    <button onclick="openModal('addGroup')" style="width:100%;padding:11px;border-radius:12px;border:2px dashed #D0D0D0;background:transparent;color:#C0C0C0;font-size:13px;cursor:pointer;font-family:inherit;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:5px;">
+      <span style="font-size:16px;">＋</span> グループを追加
+    </button>
+  </div>`;
+  return html;
+}
 
-    function ChartScreen({ task, onClose, onToggleDate }) {
-      const data = buildChartData(task);
-      const last = lastDone(task);
-      const days = daysSince(last);
-      const status = getStatus(days, task.intervalDays);
-      const cfg = STATUS[status];
-      const [selectedDate, setSelectedDate] = useState(today());
-      const isDone = (task.history || []).includes(selectedDate);
+function renderGroup(g) {
+  const collapsed = collapsedGroups[g.id];
+  const alertCount = g.tasks.filter(t => { const d=daysSince(lastDone(t)); return d===null||d>=t.intervalDays; }).length;
+  let html = `
+  <div style="margin-bottom:10px;">
+    <div onclick="toggleGroup('${g.id}')" style="display:flex;align-items:center;gap:8px;padding:7px 12px;cursor:pointer;">
+      <span style="font-size:15px;">${g.icon}</span>
+      <span style="font-size:12px;font-weight:700;color:#555;flex:1;">${g.name}</span>
+      ${alertCount > 0 ? `<span style="background:#F44336;color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:1px 7px;">${alertCount}</span>` : ""}
+      <button onclick="event.stopPropagation();openModal('editGroup','${g.id}')" style="background:none;border:none;color:#CCC;font-size:12px;cursor:pointer;padding:0 2px;">✏️</button>
+      <span style="color:#bbb;font-size:11px;display:inline-block;transform:${collapsed?"rotate(-90deg)":"rotate(0)"};transition:transform 0.2s;">▼</span>
+    </div>`;
+  if (!collapsed) {
+    html += `<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 8px rgba(0,0,0,0.07);">`;
+    g.tasks.forEach(t => { html += renderTaskRow(t); });
+    html += `
+      <button onclick="openModal('addTask','${g.id}')" style="width:100%;padding:9px 12px;border:none;background:#FAFAFA;color:#C0C0C0;font-size:12px;cursor:pointer;font-family:inherit;text-align:left;display:flex;align-items:center;gap:5px;">
+        <span style="font-size:14px;">＋</span> タスクを追加
+      </button>
+    </div>`;
+  }
+  html += `</div>`;
+  return html;
+}
 
-      const CustomDot = (props) => {
-        const { cx, cy, payload } = props;
-        if (!payload.done) return null;
-        return React.createElement('circle', { cx, cy, r:5, fill:"#5C6BC0", stroke:"#fff", strokeWidth:2 });
-      };
-      const CustomTooltip = ({ active, payload }) => {
-        if (!active || !payload || !payload.length) return null;
-        const d = payload[0].payload;
-        return React.createElement('div', { style: { background:"#2D3748", color:"#fff", borderRadius:10, padding:"8px 12px", fontSize:12, lineHeight:1.6 }},
-          React.createElement('div', { style: { fontWeight:700 }}, d.label),
-          d.done ? React.createElement('div', { style: { color:"#68D391" }}, "✓ 実施日") : React.createElement('div', null, `${d.days}日経過`)
-        );
-      };
+function renderTaskRow(task) {
+  const last = lastDone(task);
+  const days = daysSince(last);
+  const status = getStatus(days, task.intervalDays);
+  const cfg = STATUS[status];
+  const progress = days === null ? 0 : Math.min(days / task.intervalDays, 1);
+  const daysLeft = days === null ? null : task.intervalDays - days;
+  const doneToday = last === today();
 
-      return React.createElement('div', { style: { display:"flex", flexDirection:"column", height:"100vh", background:"#F4F6FA" }},
-        React.createElement('div', { style: { background:"linear-gradient(135deg,#2D3748,#4A5568)", padding:"52px 20px 20px", color:"#fff", flexShrink:0 }},
-          React.createElement('button', { onClick: onClose, style: { background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", borderRadius:99, padding:"6px 14px", fontSize:13, cursor:"pointer", marginBottom:12, fontFamily:"inherit" }}, "← 戻る"),
-          React.createElement('div', { style: { display:"flex", alignItems:"center", gap:10 }},
-            React.createElement('span', { style: { fontSize:26 }}, task.icon),
-            React.createElement('div', null,
-              React.createElement('div', { style: { fontSize:19, fontWeight:700 }}, task.name),
-              React.createElement('div', { style: { fontSize:11, opacity:0.6, marginTop:2 }}, `目安：${task.intervalDays}日ごと`)
-            )
-          ),
-          React.createElement('div', { style: { marginTop:14, background:"rgba(255,255,255,0.1)", borderRadius:12, padding:"12px 16px", display:"flex", justifyContent:"space-between" }},
-            React.createElement('div', null, React.createElement('div', { style: { fontSize:10, opacity:0.6 }}, "前回実施"), React.createElement('div', { style: { fontSize:15, fontWeight:700, marginTop:2 }}, last ? fmtDate(last) : "未実施")),
-            React.createElement('div', { style: { textAlign:"center" }}, React.createElement('div', { style: { fontSize:10, opacity:0.6 }}, "経過"), React.createElement('div', { style: { fontSize:15, fontWeight:700, marginTop:2, color:cfg.bar }}, days !== null ? `${days}日` : "−")),
-            React.createElement('div', { style: { textAlign:"right" }}, React.createElement('div', { style: { fontSize:10, opacity:0.6 }}, "実施回数"), React.createElement('div', { style: { fontSize:15, fontWeight:700, marginTop:2 }}, `${(task.history||[]).length}回`))
-          )
-        ),
-        React.createElement('div', { style: { flex:1, overflowY:"auto", padding:"16px 12px 32px" }},
-          React.createElement('div', { style: { fontSize:11, color:"#999", marginBottom:8 }}, "経過日数の推移"),
-          data.length < 2
-            ? React.createElement('div', { style: { textAlign:"center", padding:"32px 20px", color:"#BDBDBD" }},
-                React.createElement('div', { style: { fontSize:32, marginBottom:8 }}, "📊"),
-                React.createElement('div', { style: { fontSize:13 }}, "記録が2件以上になるとグラフが表示されます")
-              )
-            : React.createElement('div', { style: { background:"#fff", borderRadius:14, padding:"14px 4px 8px", boxShadow:"0 1px 8px rgba(0,0,0,0.07)", marginBottom:16 }},
-                React.createElement(ResponsiveContainer, { width:"100%", height:200 },
-                  React.createElement(AreaChart, { data, margin:{ top:8, right:20, left:-16, bottom:0 }},
-                    React.createElement('defs', null,
-                      React.createElement('linearGradient', { id:"aGrad", x1:"0", y1:"0", x2:"0", y2:"1" },
-                        React.createElement('stop', { offset:"5%", stopColor:"#5C6BC0", stopOpacity:0.15 }),
-                        React.createElement('stop', { offset:"95%", stopColor:"#5C6BC0", stopOpacity:0 })
-                      )
-                    ),
-                    React.createElement(XAxis, { dataKey:"label", tick:{ fontSize:9, fill:"#AAA" }, interval:Math.max(1,Math.floor(data.length/5)), tickLine:false, axisLine:false }),
-                    React.createElement(YAxis, { tick:{ fontSize:9, fill:"#AAA" }, tickLine:false, axisLine:false, allowDecimals:false }),
-                    React.createElement(Tooltip, { content: React.createElement(CustomTooltip) }),
-                    React.createElement(ReferenceLine, { y:task.intervalDays, stroke:"#F44336", strokeDasharray:"4 3", strokeWidth:1.5, label:{ value:"目安", position:"insideTopRight", fontSize:9, fill:"#F44336" }}),
-                    React.createElement(Area, { type:"monotone", dataKey:"days", stroke:"#5C6BC0", strokeWidth:2, fill:"url(#aGrad)", dot:React.createElement(CustomDot), activeDot:{ r:5, fill:"#5C6BC0" }})
-                  )
-                )
-              ),
-          React.createElement('div', { style: { background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 8px rgba(0,0,0,0.07)", marginBottom:16 }},
-            React.createElement('div', { style: { fontSize:12, fontWeight:700, color:"#555", marginBottom:12 }}, "日付を指定して記録を編集"),
-            React.createElement('input', { type:"date", value:selectedDate, max:today(), onChange:e=>setSelectedDate(e.target.value), style:{ width:"100%", padding:"10px 12px", borderRadius:10, border:"1.5px solid #E0E0E0", fontSize:15, fontFamily:"inherit", outline:"none", boxSizing:"border-box", marginBottom:10 }}),
-            React.createElement('div', { style: { fontSize:12, color:"#AAA", marginBottom:12 }}, `${fmtDateLong(selectedDate)}　→　${isDone ? "✅ 実施済み" : "⬜ 未実施"}`),
-            isDone
-              ? React.createElement('button', { onClick:()=>onToggleDate(task.id,selectedDate,false), style:{ width:"100%", padding:"12px", borderRadius:12, border:"1.5px solid #FFCDD2", background:"#FFF5F5", color:"#E53935", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}, "この日の記録を削除")
-              : React.createElement('button', { onClick:()=>onToggleDate(task.id,selectedDate,true), style:{ width:"100%", padding:"12px", borderRadius:12, border:"none", background:"linear-gradient(135deg,#5C6BC0,#7E57C2)", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer", fontFamily:"inherit" }}, "この日を実施済みにする")
-          ),
-          React.createElement('div', { style: { background:"#fff", borderRadius:14, padding:"16px", boxShadow:"0 1px 8px rgba(0,0,0,0.07)" }},
-            React.createElement('div', { style: { fontSize:12, fontWeight:700, color:"#555", marginBottom:10 }},
-              "実施履歴　", React.createElement('span', { style:{ fontWeight:400, color:"#AAA" }}, "（タップで削除）")
-            ),
-            !(task.history && task.history.length)
-              ? React.createElement('div', { style:{ color:"#CCC", fontSize:13, textAlign:"center", padding:"16px 0" }}, "まだ記録がありません")
-              : React.createElement('div', { style:{ display:"flex", flexWrap:"wrap", gap:6 }},
-                  [...task.history].sort().reverse().map(d =>
-                    React.createElement('button', { key:d, onClick:()=>onToggleDate(task.id,d,false), style:{ background:"#EEF0FF", color:"#5C6BC0", borderRadius:8, padding:"5px 10px", fontSize:12, fontWeight:600, border:"none", cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4 }},
-                      fmtDate(d), React.createElement('span', { style:{ fontSize:10, color:"#AAA" }}, "✕")
-                    )
-                  )
-                )
-          )
-        )
-      );
-    }
+  return `
+  <div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:#fff;border-bottom:1px solid #F5F5F5;">
+    <div style="position:relative;flex-shrink:0;">
+      <div style="width:34px;height:34px;border-radius:9px;background:${doneToday?"#E8F5E9":cfg.bg};display:flex;align-items:center;justify-content:center;font-size:17px;">${doneToday?"✅":task.icon}</div>
+      <div style="position:absolute;bottom:0;right:0;width:9px;height:9px;border-radius:50%;background:${doneToday?"#4CAF50":cfg.bar};border:2px solid #fff;"></div>
+    </div>
+    <div onclick="openChart('${task.id}')" style="flex:1;min-width:0;cursor:pointer;">
+      <div style="display:flex;align-items:baseline;gap:5px;">
+        <span style="font-size:13px;font-weight:600;color:#1a1a2e;">${task.name}</span>
+        <span style="font-size:10px;color:#bbb;">${task.intervalDays}日</span>
+      </div>
+      <div style="margin-top:3px;background:#F0F0F0;border-radius:99px;height:3px;">
+        <div style="width:${progress*100}%;background:${doneToday?"#4CAF50":cfg.bar};height:100%;border-radius:99px;"></div>
+      </div>
+      <div style="margin-top:3px;font-size:10px;color:${doneToday?"#2E7D32":cfg.text};">
+        ${doneToday ? "今日実施済み ✓"
+          : days === null ? "未実施"
+          : daysLeft > 0 ? `${days}日前（あと${daysLeft}日）`
+          : `${days}日前（${-daysLeft}日超過）`}
+        ${last && !doneToday ? `<span style="color:#bbb;margin-left:5px;">${fmtDate(last)}</span>` : ""}
+      </div>
+    </div>
+    ${doneToday ? `<button onclick="handleUndo('${task.id}')" style="flex-shrink:0;padding:5px 8px;border-radius:8px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:10px;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap;">取消</button>` : ""}
+    ${!doneToday ? `<button onclick="handleDone('${task.id}')" style="flex-shrink:0;width:40px;height:40px;border-radius:10px;border:none;cursor:pointer;background:linear-gradient(135deg,#5C6BC0,#7E57C2);color:#fff;font-size:16px;box-shadow:0 2px 6px rgba(92,107,192,0.3);">✓</button>` : ""}
+    <button onclick="openModal('editTask','${task.id}')" style="flex-shrink:0;width:24px;height:24px;border-radius:6px;border:none;background:none;cursor:pointer;color:#CCC;font-size:13px;padding:0;">⋯</button>
+  </div>`;
+}
 
-    function TaskRow({ task, onDone, onUndo, onEdit, onChart }) {
-      const last = lastDone(task);
-      const days = daysSince(last);
-      const status = getStatus(days, task.intervalDays);
-      const cfg = STATUS[status];
-      const progress = days === null ? 0 : Math.min(days / task.intervalDays, 1);
-      const daysLeft = days === null ? null : task.intervalDays - days;
-      const doneToday = last === today();
+// ── グラフ画面 ──
+function renderChartScreen() {
+  const task = findTask(chartTaskId);
+  if (!task) return "";
+  const last = lastDone(task);
+  const days = daysSince(last);
+  const status = getStatus(days, task.intervalDays);
+  const cfg = STATUS[status];
+  const selDate = formData.selectedDate || today();
+  const isDone = (task.history||[]).includes(selDate);
 
-      return React.createElement('div', { style:{ display:"flex", alignItems:"center", gap:8, padding:"9px 12px", background:"#fff", borderBottom:"1px solid #F5F5F5" }},
-        React.createElement('div', { style:{ position:"relative", flexShrink:0 }},
-          React.createElement('div', { style:{ width:34, height:34, borderRadius:9, background:doneToday?"#E8F5E9":cfg.bg, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17 }}, doneToday?"✅":task.icon),
-          React.createElement('div', { style:{ position:"absolute", bottom:0, right:0, width:9, height:9, borderRadius:"50%", background:doneToday?"#4CAF50":cfg.bar, border:"2px solid #fff" }})
-        ),
-        React.createElement('div', { style:{ flex:1, minWidth:0, cursor:"pointer" }, onClick:()=>onChart(task) },
-          React.createElement('div', { style:{ display:"flex", alignItems:"baseline", gap:5 }},
-            React.createElement('span', { style:{ fontSize:13, fontWeight:600, color:"#1a1a2e" }}, task.name),
-            React.createElement('span', { style:{ fontSize:10, color:"#bbb" }}, `${task.intervalDays}日`)
-          ),
-          React.createElement('div', { style:{ marginTop:3, background:"#F0F0F0", borderRadius:99, height:3 }},
-            React.createElement('div', { style:{ width:`${progress*100}%`, background:doneToday?"#4CAF50":cfg.bar, height:"100%", borderRadius:99, transition:"width 0.5s" }})
-          ),
-          React.createElement('div', { style:{ marginTop:3, fontSize:10, color:doneToday?"#2E7D32":cfg.text }},
-            doneToday ? "今日実施済み ✓"
-              : days === null ? "未実施"
-              : daysLeft > 0 ? `${days}日前（あと${daysLeft}日）`
-              : `${days}日前（${-daysLeft}日超過）`,
-            last && !doneToday && React.createElement('span', { style:{ color:"#bbb", marginLeft:5 }}, fmtDate(last))
-          )
-        ),
-        doneToday && React.createElement('button', { onClick:()=>onUndo(task.id), style:{ flexShrink:0, padding:"5px 8px", borderRadius:8, border:"1.5px solid #FFCDD2", background:"#FFF5F5", color:"#E53935", fontSize:10, cursor:"pointer", fontFamily:"inherit", fontWeight:600, whiteSpace:"nowrap" }}, "取消"),
-        !doneToday && React.createElement('button', { onClick:()=>onDone(task.id), style:{ flexShrink:0, width:40, height:40, borderRadius:10, border:"none", cursor:"pointer", background:"linear-gradient(135deg,#5C6BC0,#7E57C2)", color:"#fff", fontSize:16, display:"flex", alignItems:"center", justifyContent:"center", boxShadow:"0 2px 6px rgba(92,107,192,0.3)" }}, "✓"),
-        React.createElement('button', { onClick:()=>onEdit(task), style:{ flexShrink:0, width:24, height:24, borderRadius:6, border:"none", background:"none", cursor:"pointer", color:"#CCC", fontSize:13, padding:0, display:"flex", alignItems:"center", justifyContent:"center" }}, "⋯")
-      );
-    }
+  return `
+  <div style="display:flex;flex-direction:column;height:100vh;background:#F4F6FA;">
+    <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:52px 20px 20px;color:#fff;flex-shrink:0;">
+      <button onclick="closeChart()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:99px;padding:6px 14px;font-size:13px;cursor:pointer;margin-bottom:12px;font-family:inherit;">← 戻る</button>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span style="font-size:26px;">${task.icon}</span>
+        <div>
+          <div style="font-size:19px;font-weight:700;">${task.name}</div>
+          <div style="font-size:11px;opacity:0.6;margin-top:2px;">目安：${task.intervalDays}日ごと</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;background:rgba(255,255,255,0.1);border-radius:12px;padding:12px 16px;display:flex;justify-content:space-between;">
+        <div><div style="font-size:10px;opacity:0.6;">前回実施</div><div style="font-size:15px;font-weight:700;margin-top:2px;">${last?fmtDate(last):"未実施"}</div></div>
+        <div style="text-align:center;"><div style="font-size:10px;opacity:0.6;">経過</div><div style="font-size:15px;font-weight:700;margin-top:2px;color:${cfg.bar};">${days!==null?`${days}日`:"−"}</div></div>
+        <div style="text-align:right;"><div style="font-size:10px;opacity:0.6;">実施回数</div><div style="font-size:15px;font-weight:700;margin-top:2px;">${(task.history||[]).length}回</div></div>
+      </div>
+    </div>
+    <div style="flex:1;overflow-y:auto;padding:16px 12px 32px;">
+      <div style="font-size:11px;color:#999;margin-bottom:8px;">経過日数の推移</div>
+      <div style="background:#fff;border-radius:14px;padding:14px 8px 8px;box-shadow:0 1px 8px rgba(0,0,0,0.07);margin-bottom:16px;">
+        <canvas id="chart-canvas" style="width:100%;display:block;"></canvas>
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.07);margin-bottom:16px;">
+        <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:12px;">日付を指定して記録を編集</div>
+        <input type="date" id="date-picker" value="${selDate}" max="${today()}" onchange="onDateChange(this.value)"
+          style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid #E0E0E0;font-size:15px;font-family:inherit;outline:none;box-sizing:border-box;margin-bottom:10px;">
+        <div style="font-size:12px;color:#AAA;margin-bottom:12px;">${fmtDateLong(selDate)}　→　${isDone?"✅ 実施済み":"⬜ 未実施"}</div>
+        ${isDone
+          ? `<button onclick="toggleDate('${task.id}','${selDate}',false)" style="width:100%;padding:12px;border-radius:12px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">この日の記録を削除</button>`
+          : `<button onclick="toggleDate('${task.id}','${selDate}',true)" style="width:100%;padding:12px;border-radius:12px;border:none;background:linear-gradient(135deg,#5C6BC0,#7E57C2);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;">この日を実施済みにする</button>`}
+      </div>
+      <div style="background:#fff;border-radius:14px;padding:16px;box-shadow:0 1px 8px rgba(0,0,0,0.07);">
+        <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:10px;">実施履歴　<span style="font-weight:400;color:#AAA;">（タップで削除）</span></div>
+        ${!(task.history&&task.history.length)
+          ? `<div style="color:#CCC;font-size:13px;text-align:center;padding:16px 0;">まだ記録がありません</div>`
+          : `<div style="display:flex;flex-wrap:wrap;gap:6px;">${[...task.history].sort().reverse().map(d=>`<button onclick="toggleDate('${task.id}','${d}',false)" style="background:#EEF0FF;color:#5C6BC0;border-radius:8px;padding:5px 10px;font-size:12px;font-weight:600;border:none;cursor:pointer;font-family:inherit;">${fmtDate(d)} <span style="font-size:10px;color:#AAA;">✕</span></button>`).join("")}</div>`}
+      </div>
+    </div>
+  </div>`;
+}
 
-    function Group({ group, onDone, onUndo, onEditTask, onAddTask, onEditGroup, onChart }) {
-      const [collapsed, setCollapsed] = useState(false);
-      const alertCount = group.tasks.filter(t => { const d = daysSince(lastDone(t)); return d === null || d >= t.intervalDays; }).length;
-      return React.createElement('div', { style:{ marginBottom:10 }},
-        React.createElement('div', { style:{ display:"flex", alignItems:"center", gap:8, padding:"7px 12px", cursor:"pointer" }, onClick:()=>setCollapsed(c=>!c) },
-          React.createElement('span', { style:{ fontSize:15 }}, group.icon),
-          React.createElement('span', { style:{ fontSize:12, fontWeight:700, color:"#555", flex:1 }}, group.name),
-          alertCount > 0 && React.createElement('span', { style:{ background:"#F44336", color:"#fff", borderRadius:99, fontSize:10, fontWeight:700, padding:"1px 7px" }}, alertCount),
-          React.createElement('button', { onClick:e=>{ e.stopPropagation(); onEditGroup(group); }, style:{ background:"none", border:"none", color:"#CCC", fontSize:12, cursor:"pointer", padding:"0 2px" }}, "✏️"),
-          React.createElement('span', { style:{ color:"#bbb", fontSize:11, display:"inline-block", transform:collapsed?"rotate(-90deg)":"rotate(0)", transition:"transform 0.2s" }}, "▼")
-        ),
-        !collapsed && React.createElement('div', { style:{ background:"#fff", borderRadius:12, overflow:"hidden", boxShadow:"0 1px 8px rgba(0,0,0,0.07)" }},
-          group.tasks.map(task => React.createElement(TaskRow, { key:task.id, task, onDone, onUndo, onEdit:onEditTask, onChart })),
-          React.createElement('button', { onClick:()=>onAddTask(group.id), style:{ width:"100%", padding:"9px 12px", border:"none", background:"#FAFAFA", color:"#C0C0C0", fontSize:12, cursor:"pointer", fontFamily:"inherit", textAlign:"left", display:"flex", alignItems:"center", gap:5 }},
-            React.createElement('span', { style:{ fontSize:14 }}, "＋"), " タスクを追加"
-          )
-        )
-      );
-    }
+// ── モーダル ──
+function renderModal() {
+  let content = "";
+  let title = "";
 
-    function App() {
-      const [groups, setGroups] = useState(() => {
-        try {
-          const s = localStorage.getItem(STORAGE_KEY);
-          if (s) {
-            const parsed = JSON.parse(s);
-            return parsed.map(g => ({ ...g, tasks: g.tasks.map(t => ({ ...t, history: t.history || (t.lastDone ? [t.lastDone] : []) })) }));
-          }
-        } catch {}
-        return DEFAULT_DATA;
-      });
+  if (modalType === "addTask") {
+    title = "タスクを追加";
+    content = `
+      ${inputField("タスク名","name","text","例：トイレ掃除")}
+      ${inputField("アイコン（絵文字1文字）","icon","text","🚽")}
+      ${inputField("目安間隔（日数）","intervalDays","number","7")}
+      <button onclick="submitModal()" style="${primaryBtnStyle()}">追加する</button>`;
+  } else if (modalType === "editTask") {
+    title = "タスクを編集";
+    content = `
+      ${inputField("タスク名","name","text","")}
+      ${inputField("アイコン（絵文字1文字）","icon","text","")}
+      ${inputField("目安間隔（日数）","intervalDays","number","")}
+      <button onclick="submitModal()" style="${primaryBtnStyle()}">保存する</button>
+      <button onclick="deleteItem()" style="width:100%;padding:12px;margin-top:10px;border-radius:12px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:14px;cursor:pointer;font-family:inherit;">このタスクを削除</button>`;
+  } else if (modalType === "addGroup") {
+    title = "グループを追加";
+    content = `
+      ${inputField("グループ名","name","text","例：室内")}
+      ${inputField("アイコン（絵文字1文字）","icon","text","🏠")}
+      <button onclick="submitModal()" style="${primaryBtnStyle()}">追加する</button>`;
+  } else if (modalType === "editGroup") {
+    title = "グループを編集";
+    content = `
+      ${inputField("グループ名","name","text","")}
+      ${inputField("アイコン（絵文字1文字）","icon","text","")}
+      <button onclick="submitModal()" style="${primaryBtnStyle()}">保存する</button>
+      <button onclick="deleteItem()" style="width:100%;padding:12px;margin-top:10px;border-radius:12px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:14px;cursor:pointer;font-family:inherit;">このグループを削除</button>`;
+  }
 
-      useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(groups)); } catch {} }, [groups]);
+  return `
+  <div onclick="closeModal()" style="position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:200;display:flex;align-items:flex-end;">
+    <div onclick="event.stopPropagation()" style="width:100%;background:#fff;border-radius:20px 20px 0 0;padding:24px 20px 36px;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+        <span style="font-size:16px;font-weight:700;color:#1a1a2e;">${title}</span>
+        <button onclick="closeModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#999;">✕</button>
+      </div>
+      ${content}
+    </div>
+  </div>`;
+}
 
-      const [modal, setModal] = useState(null);
-      const [form, setForm] = useState({});
-      const [toast, setToast] = useState(null);
-      const [chartTask, setChartTask] = useState(null);
-      const [showMenu, setShowMenu] = useState(false);
+function inputField(label, key, type, placeholder) {
+  const val = formData[key] !== undefined ? formData[key] : "";
+  return `
+  <div style="margin-bottom:14px;">
+    <div style="font-size:12px;color:#888;margin-bottom:4px;font-weight:600;">${label}</div>
+    <input type="${type}" placeholder="${placeholder}" value="${val}"
+      oninput="formData['${key}']=this.value"
+      style="width:100%;padding:11px 14px;border-radius:10px;border:1.5px solid #E0E0E0;font-size:15px;font-family:inherit;outline:none;box-sizing:border-box;">
+  </div>`;
+}
+function primaryBtnStyle() { return "width:100%;padding:13px;border-radius:12px;border:none;background:linear-gradient(135deg,#5C6BC0,#7E57C2);color:#fff;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;margin-top:4px;"; }
 
-      function showToast(msg) { setToast(msg); setTimeout(() => setToast(null), 2200); }
+// ── イベントハンドラ ──
+function toggleMenu() { showMenu = !showMenu; render(); }
+function toggleGroup(id) { collapsedGroups[id] = !collapsedGroups[id]; render(); }
 
-      function updateTask(taskId, fn) {
-        setGroups(gs => gs.map(g => ({ ...g, tasks: g.tasks.map(t => t.id === taskId ? fn(t) : t) })));
-        if (chartTask && chartTask.id === taskId) setChartTask(prev => fn(prev));
-      }
+function handleDone(taskId) {
+  const td = today();
+  groups = groups.map(g => ({ ...g, tasks: g.tasks.map(t => t.id===taskId ? { ...t, history: t.history.includes(td)?t.history:[...t.history,td] } : t) }));
+  saveGroups(); render(); showToast("✅ 記録しました！");
+}
+function handleUndo(taskId) {
+  groups = groups.map(g => ({ ...g, tasks: g.tasks.map(t => t.id===taskId ? { ...t, history: t.history.filter(d=>d!==today()) } : t) }));
+  saveGroups(); render(); showToast("↩️ 取り消しました");
+}
+function toggleDate(taskId, date, add) {
+  groups = groups.map(g => ({ ...g, tasks: g.tasks.map(t => t.id===taskId ? { ...t, history: add ? (t.history.includes(date)?t.history:[...t.history,date]) : t.history.filter(d=>d!==date) } : t) }));
+  saveGroups();
+  showToast(add ? `✅ ${fmtDate(date)} を記録しました` : `🗑️ ${fmtDate(date)} の記録を削除しました`);
+  render();
+}
+function onDateChange(val) { formData.selectedDate = val; render(); }
 
-      function handleDone(taskId) {
-        const td = today();
-        updateTask(taskId, t => ({ ...t, history: t.history.includes(td) ? t.history : [...t.history, td] }));
-        showToast("✅ 記録しました！");
-      }
-      function handleUndo(taskId) {
-        updateTask(taskId, t => ({ ...t, history: t.history.filter(d => d !== today()) }));
-        showToast("↩️ 取り消しました");
-      }
-      function handleToggleDate(taskId, date, add) {
-        updateTask(taskId, t => ({ ...t, history: add ? (t.history.includes(date) ? t.history : [...t.history, date]) : t.history.filter(d => d !== date) }));
-        showToast(add ? `✅ ${fmtDate(date)} を記録しました` : `🗑️ ${fmtDate(date)} の記録を削除しました`);
-      }
+function openChart(taskId) { chartTaskId = taskId; formData = { selectedDate: today() }; currentView = "chart"; render(); }
+function closeChart() { currentView = "main"; chartTaskId = null; render(); }
 
-      function openAddTask(groupId) { setForm({ groupId, name:"", icon:"", intervalDays:"7" }); setModal("addTask"); }
-      function submitAddTask() {
-        if (!form.name.trim()) return;
-        const t = { id: uid(), name: form.name.trim(), icon: form.icon.trim()||"📋", intervalDays: parseInt(form.intervalDays)||7, history: [] };
-        setGroups(gs => gs.map(g => g.id === form.groupId ? { ...g, tasks: [...g.tasks, t] } : g));
-        setModal(null);
-      }
-      function openEditTask(task) { setForm({ ...task, intervalDays: String(task.intervalDays) }); setModal("editTask"); }
-      function submitEditTask() { updateTask(form.id, t => ({ ...t, name: form.name, icon: form.icon, intervalDays: parseInt(form.intervalDays)||7 })); setModal(null); }
-      function deleteTask() { setGroups(gs => gs.map(g => ({ ...g, tasks: g.tasks.filter(t => t.id !== form.id) }))); setModal(null); }
+function openModal(type, id) {
+  showMenu = false;
+  modalType = type;
+  formData = {};
+  if (type === "editTask") {
+    const t = findTask(id);
+    if (t) formData = { id: t.id, name: t.name, icon: t.icon, intervalDays: String(t.intervalDays) };
+  } else if (type === "editGroup") {
+    const g = findGroup(id);
+    if (g) formData = { id: g.id, name: g.name, icon: g.icon };
+  } else if (type === "addTask") {
+    formData = { groupId: id, name:"", icon:"", intervalDays:"7" };
+  } else if (type === "addGroup") {
+    formData = { name:"", icon:"" };
+  }
+  render();
+}
+function closeModal() { modalType = null; formData = {}; render(); }
 
-      function openAddGroup() { setForm({ name:"", icon:"📁" }); setModal("addGroup"); }
-      function submitAddGroup() {
-        if (!form.name.trim()) return;
-        setGroups(gs => [...gs, { id: uid(), name: form.name.trim(), icon: form.icon.trim()||"📁", tasks: [] }]);
-        setModal(null);
-      }
-      function openEditGroup(group) { setForm({ ...group }); setModal("editGroup"); }
-      function submitEditGroup() { setGroups(gs => gs.map(g => g.id === form.id ? { ...g, name: form.name, icon: form.icon } : g)); setModal(null); }
-      function deleteGroup() { setGroups(gs => gs.filter(g => g.id !== form.id)); setModal(null); }
+function submitModal() {
+  if (modalType === "addTask") {
+    if (!formData.name || !formData.name.trim()) return;
+    const t = { id:uid(), name:formData.name.trim(), icon:formData.icon||"📋", intervalDays:parseInt(formData.intervalDays)||7, history:[] };
+    groups = groups.map(g => g.id===formData.groupId ? { ...g, tasks:[...g.tasks,t] } : g);
+  } else if (modalType === "editTask") {
+    groups = groups.map(g => ({ ...g, tasks: g.tasks.map(t => t.id===formData.id ? { ...t, name:formData.name, icon:formData.icon, intervalDays:parseInt(formData.intervalDays)||7 } : t) }));
+  } else if (modalType === "addGroup") {
+    if (!formData.name || !formData.name.trim()) return;
+    groups = [...groups, { id:uid(), name:formData.name.trim(), icon:formData.icon||"📁", tasks:[] }];
+  } else if (modalType === "editGroup") {
+    groups = groups.map(g => g.id===formData.id ? { ...g, name:formData.name, icon:formData.icon } : g);
+  }
+  saveGroups(); closeModal();
+}
 
-      function exportData() {
-        const json = JSON.stringify(groups, null, 2);
-        const blob = new Blob([json], { type: "application/json" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url; a.download = `ouchitask-backup-${today()}.json`; a.click();
-        URL.revokeObjectURL(url);
-        setShowMenu(false);
-        showToast("📤 エクスポートしました");
-      }
-      function importData(e) {
-        const file = e.target.files[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = ev => {
-          try {
-            const parsed = JSON.parse(ev.target.result);
-            if (!Array.isArray(parsed)) throw new Error();
-            setGroups(parsed);
-            showToast("✅ データを読み込みました");
-          } catch { showToast("❌ ファイルの形式が正しくありません"); }
-        };
-        reader.readAsText(file);
-        setShowMenu(false);
-      }
+function deleteItem() {
+  if (modalType === "editTask") {
+    groups = groups.map(g => ({ ...g, tasks: g.tasks.filter(t => t.id!==formData.id) }));
+  } else if (modalType === "editGroup") {
+    groups = groups.filter(g => g.id!==formData.id);
+  }
+  saveGroups(); closeModal();
+}
 
-      function openChart(task) {
-        for (const g of groups) { const found = g.tasks.find(t => t.id === task.id); if (found) { setChartTask(found); return; } }
-        setChartTask(task);
-      }
+function exportData() {
+  const json = JSON.stringify(groups, null, 2);
+  const blob = new Blob([json], { type:"application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = `ouchitask-backup-${today()}.json`; a.click();
+  URL.revokeObjectURL(url);
+  showMenu = false; render(); showToast("📤 エクスポートしました");
+}
+function importData(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const parsed = JSON.parse(ev.target.result);
+      if (!Array.isArray(parsed)) throw new Error();
+      groups = parsed;
+      saveGroups(); showMenu = false; render(); showToast("✅ データを読み込みました");
+    } catch { showToast("❌ ファイルの形式が正しくありません"); }
+  };
+  reader.readAsText(file);
+}
 
-      const now = new Date();
-      const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${"日月火水木金土"[now.getDay()]}）`;
-      const totalAlert = groups.reduce((acc, g) => acc + g.tasks.filter(t => { const d = daysSince(lastDone(t)); return d === null || d >= t.intervalDays; }).length, 0);
-
-      if (chartTask) {
-        let latest = chartTask;
-        for (const g of groups) { const f = g.tasks.find(t => t.id === chartTask.id); if (f) { latest = f; break; } }
-        return React.createElement(ChartScreen, { task: latest, onClose: () => setChartTask(null), onToggleDate: handleToggleDate });
-      }
-
-      const mkModal = (title, children) => React.createElement(Modal, { title, onClose:()=>setModal(null) }, children);
-
-      return React.createElement('div', { style:{ minHeight:"100vh", background:"#F4F6FA", fontFamily:"-apple-system,'Hiragino Sans',sans-serif" }},
-        React.createElement('div', { style:{ background:"linear-gradient(135deg,#2D3748,#4A5568)", padding:"28px 20px 18px", color:"#fff", position:"relative" }},
-          React.createElement('div', { style:{ fontSize:11, opacity:0.55, letterSpacing:1.5, marginBottom:4 }}, dateLabel),
-          React.createElement('div', { style:{ display:"flex", alignItems:"center", justifyContent:"space-between" }},
-            React.createElement('div', { style:{ fontSize:22, fontWeight:700 }}, "おうちタスク"),
-            React.createElement('div', { style:{ display:"flex", alignItems:"center", gap:8 }},
-              totalAlert > 0 && React.createElement('div', { style:{ background:"#F44336", color:"#fff", borderRadius:99, fontSize:12, fontWeight:700, padding:"3px 10px" }}, `${totalAlert}件要対応`),
-              React.createElement('button', { onClick:()=>setShowMenu(m=>!m), style:{ background:"rgba(255,255,255,0.15)", border:"none", color:"#fff", width:34, height:34, borderRadius:"50%", fontSize:18, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center" }}, "⋮")
-            )
-          ),
-          React.createElement('div', { style:{ fontSize:11, opacity:0.45, marginTop:4 }}, "タスク名タップでグラフ・履歴編集"),
-          showMenu && React.createElement('div', { onClick:()=>setShowMenu(false), style:{ position:"fixed", inset:0, zIndex:100 }},
-            React.createElement('div', { onClick:e=>e.stopPropagation(), style:{ position:"absolute", top:80, right:16, background:"#fff", borderRadius:14, boxShadow:"0 4px 24px rgba(0,0,0,0.15)", overflow:"hidden", minWidth:190, zIndex:101 }},
-              React.createElement('button', { onClick:exportData, style:{ width:"100%", padding:"14px 18px", border:"none", background:"none", fontSize:14, cursor:"pointer", fontFamily:"inherit", textAlign:"left", color:"#333", display:"flex", alignItems:"center", gap:8, borderBottom:"1px solid #F0F0F0" }}, "📤 データをエクスポート"),
-              React.createElement('label', { style:{ display:"flex", alignItems:"center", gap:8, padding:"14px 18px", fontSize:14, cursor:"pointer", fontFamily:"inherit", color:"#333" }},
-                "📥 データをインポート",
-                React.createElement('input', { type:"file", accept:".json", onChange:importData, style:{ display:"none" }})
-              )
-            )
-          )
-        ),
-        React.createElement('div', { style:{ padding:"14px 12px 80px" }},
-          groups.map(g => React.createElement(Group, { key:g.id, group:g, onDone:handleDone, onUndo:handleUndo, onEditTask:openEditTask, onAddTask:openAddTask, onEditGroup:openEditGroup, onChart:openChart })),
-          React.createElement('button', { onClick:openAddGroup, style:{ width:"100%", padding:"11px", borderRadius:12, border:"2px dashed #D0D0D0", background:"transparent", color:"#C0C0C0", fontSize:13, cursor:"pointer", fontFamily:"inherit", marginTop:4, display:"flex", alignItems:"center", justifyContent:"center", gap:5 }},
-            React.createElement('span', { style:{ fontSize:16 }}, "＋"), " グループを追加"
-          )
-        ),
-        toast && React.createElement('div', { style:{ position:"fixed", bottom:32, left:"50%", transform:"translateX(-50%)", background:"#2D3748", color:"#fff", padding:"10px 24px", borderRadius:99, fontSize:14, fontWeight:600, boxShadow:"0 4px 16px rgba(0,0,0,0.2)", whiteSpace:"nowrap", zIndex:300 }}, toast),
-        modal === "addTask" && mkModal("タスクを追加", React.createElement(React.Fragment, null,
-          React.createElement(InputField, { label:"タスク名", placeholder:"例：トイレ掃除", value:form.name||"", onChange:e=>setForm(f=>({...f,name:e.target.value})), autoFocus:true }),
-          React.createElement(InputField, { label:"アイコン（絵文字1文字）", placeholder:"🚽", value:form.icon||"", onChange:e=>setForm(f=>({...f,icon:e.target.value})) }),
-          React.createElement(InputField, { label:"目安間隔（日数）", type:"number", placeholder:"7", value:form.intervalDays||"", onChange:e=>setForm(f=>({...f,intervalDays:e.target.value})) }),
-          React.createElement(PrimaryBtn, { onClick:submitAddTask }, "追加する")
-        )),
-        modal === "editTask" && mkModal("タスクを編集", React.createElement(React.Fragment, null,
-          React.createElement(InputField, { label:"タスク名", value:form.name||"", onChange:e=>setForm(f=>({...f,name:e.target.value})) }),
-          React.createElement(InputField, { label:"アイコン（絵文字1文字）", value:form.icon||"", onChange:e=>setForm(f=>({...f,icon:e.target.value})) }),
-          React.createElement(InputField, { label:"目安間隔（日数）", type:"number", value:form.intervalDays||"", onChange:e=>setForm(f=>({...f,intervalDays:e.target.value})) }),
-          React.createElement(PrimaryBtn, { onClick:submitEditTask }, "保存する"),
-          React.createElement('button', { onClick:deleteTask, style:{ width:"100%", padding:"12px", marginTop:10, borderRadius:12, border:"1.5px solid #FFCDD2", background:"#FFF5F5", color:"#E53935", fontSize:14, cursor:"pointer", fontFamily:"inherit" }}, "このタスクを削除")
-        )),
-        modal === "addGroup" && mkModal("グループを追加", React.createElement(React.Fragment, null,
-          React.createElement(InputField, { label:"グループ名", placeholder:"例：室内", value:form.name||"", onChange:e=>setForm(f=>({...f,name:e.target.value})), autoFocus:true }),
-          React.createElement(InputField, { label:"アイコン（絵文字1文字）", placeholder:"🏠", value:form.icon||"", onChange:e=>setForm(f=>({...f,icon:e.target.value})) }),
-          React.createElement(PrimaryBtn, { onClick:submitAddGroup }, "追加する")
-        )),
-        modal === "editGroup" && mkModal("グループを編集", React.createElement(React.Fragment, null,
-          React.createElement(InputField, { label:"グループ名", value:form.name||"", onChange:e=>setForm(f=>({...f,name:e.target.value})) }),
-          React.createElement(InputField, { label:"アイコン（絵文字1文字）", value:form.icon||"", onChange:e=>setForm(f=>({...f,icon:e.target.value})) }),
-          React.createElement(PrimaryBtn, { onClick:submitEditGroup }, "保存する"),
-          React.createElement('button', { onClick:deleteGroup, style:{ width:"100%", padding:"12px", marginTop:10, borderRadius:12, border:"1.5px solid #FFCDD2", background:"#FFF5F5", color:"#E53935", fontSize:14, cursor:"pointer", fontFamily:"inherit" }}, "このグループを削除")
-        ))
-      );
-    }
-
-    ReactDOM.render(React.createElement(App), document.getElementById('root'));
-  </script>
+// ── 起動 ──
+loadGroups();
+render();
+</script>
 </body>
 </html>
