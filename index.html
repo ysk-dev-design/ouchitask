@@ -17,13 +17,9 @@
     .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
     .spinner { display:inline-block; width:18px; height:18px; border:2px solid rgba(255,255,255,0.4); border-top-color:#fff; border-radius:50%; animation:spin 0.7s linear infinite; vertical-align:middle; margin-right:6px; }
     @keyframes spin { to { transform:rotate(360deg); } }
-
-    /* ── レイアウト列数切り替え ── */
     .layout-switcher { display:flex; gap:4px; align-items:center; }
     .layout-btn { background:rgba(255,255,255,0.15); color:#fff; border:none; border-radius:7px; padding:4px 9px; font-size:12px; font-weight:600; cursor:pointer; font-family:inherit; line-height:1.4; transition:background 0.15s; }
     .layout-btn.active { background:rgba(255,255,255,0.45); }
-
-    /* ── 並び替えボタン ── */
     .sort-btn { background:none; border:1px solid rgba(0,0,0,0.12); color:#AAA; border-radius:5px; width:22px; height:22px; font-size:10px; cursor:pointer; line-height:1; padding:0; display:inline-flex; align-items:center; justify-content:center; flex-shrink:0; }
     .sort-btn:active { background:#EEE; }
     .sort-btn:disabled { opacity:0.2; cursor:default; pointer-events:none; }
@@ -73,7 +69,6 @@ function fmtDate(str) {
   const d = new Date(str);
   return `${d.getMonth()+1}/${d.getDate()}`;
 }
-// ★ 曜日付きフォーマット（グラフX軸用）
 const WEEKDAYS = ["日","月","火","水","木","金","土"];
 function fmtDateWithDay(str) {
   if (!str) return null;
@@ -98,7 +93,7 @@ const STATUS = {
   none:{ bar:"#BDBDBD", bg:"#F5F5F5", text:"#757575", label:"未実施" },
 };
 
-// ── データ管理（スプレッドシート同期） ──
+// ── データ管理 ──
 let groups = [];
 let isSyncing = false;
 let pendingSave = false;
@@ -122,24 +117,19 @@ async function loadFromCloud() {
     return false;
   }
 }
-
 async function saveToCloud() {
   if (isSyncing) { pendingSave = true; return; }
   isSyncing = true;
   try {
     await fetch(SCRIPT_URL, {
-      method:"POST",
-      redirect:"follow",
+      method:"POST", redirect:"follow",
       headers:{ "Content-Type":"text/plain" },
       body: JSON.stringify(groups)
     });
-  } catch(e) {
-    console.warn("クラウド保存失敗:", e);
-  }
+  } catch(e) { console.warn("クラウド保存失敗:", e); }
   isSyncing = false;
   if (pendingSave) { pendingSave = false; saveToCloud(); }
 }
-
 function loadLocal() {
   try {
     const s = localStorage.getItem(LOCAL_KEY);
@@ -154,10 +144,7 @@ function loadLocal() {
 function saveLocal() {
   try { localStorage.setItem(LOCAL_KEY, JSON.stringify(groups)); } catch {}
 }
-function saveGroups() {
-  saveLocal();
-  saveToCloud();
-}
+function saveGroups() { saveLocal(); saveToCloud(); }
 
 // ── トースト ──
 let toastTimer;
@@ -169,7 +156,7 @@ function showToast(msg) {
   toastTimer = setTimeout(() => t.classList.remove("show"), 2500);
 }
 
-// ── ★ レイアウト列数管理 ──
+// ── レイアウト列数管理 ──
 function getDeviceKey() {
   const w = window.innerWidth;
   if (w <= 500) return "mobile";
@@ -177,14 +164,14 @@ function getDeviceKey() {
   return "desktop";
 }
 function getLayoutCols() {
-  return parseInt(localStorage.getItem(LAYOUT_KEY_PREFIX + getDeviceKey()) || "1");
+  return parseInt(localStorage.getItem(LAYOUT_KEY_PREFIX + getDeviceKey()) || "2");
 }
 function setLayoutCols(cols) {
   localStorage.setItem(LAYOUT_KEY_PREFIX + getDeviceKey(), cols);
   render();
 }
 
-// ── ★ グループ・タスク並び替え ──
+// ── 並び替え ──
 function moveGroup(groupId, dir) {
   const idx = groups.findIndex(g => g.id === groupId);
   if (idx < 0) return;
@@ -193,8 +180,7 @@ function moveGroup(groupId, dir) {
   const arr = [...groups];
   [arr[idx], arr[next]] = [arr[next], arr[idx]];
   groups = arr;
-  saveGroups();
-  render();
+  saveGroups(); render();
 }
 function moveTask(groupId, taskId, dir) {
   const g = groups.find(g => g.id === groupId);
@@ -206,11 +192,10 @@ function moveTask(groupId, taskId, dir) {
   const arr = [...g.tasks];
   [arr[idx], arr[next]] = [arr[next], arr[idx]];
   g.tasks = arr;
-  saveGroups();
-  render();
+  saveGroups(); render();
 }
 
-// ── グラフ（Canvas） ──
+// ── グラフ ──
 function buildChartData(task) {
   const hist = new Set(task.history || []);
   const sorted = [...hist].sort();
@@ -222,12 +207,10 @@ function buildChartData(task) {
   for (let d = new Date(start); d <= end; d.setDate(d.getDate()+1)) {
     const ds = d.toISOString().split("T")[0];
     if (hist.has(ds)) { count = 0; } else { count++; }
-    // ★ labelをfmtDateWithDayに変更
     data.push({ label: fmtDateWithDay(ds), days:count, done:hist.has(ds) });
   }
   return data;
 }
-
 function drawChart(canvas, task) {
   const data = buildChartData(task);
   const dpr = window.devicePixelRatio || 1;
@@ -240,7 +223,6 @@ function drawChart(canvas, task) {
   const ctx = canvas.getContext("2d");
   ctx.scale(dpr, dpr);
   const W = displayW, H = displayH;
-  // ★ bottomパディングを広げて曜日ラベル用スペース確保
   const pad = { top:16, right:28, bottom:36, left:32 };
   const cW = W - pad.left - pad.right;
   const cH = H - pad.top - pad.bottom;
@@ -253,7 +235,6 @@ function drawChart(canvas, task) {
   const maxY = Math.max(...data.map(d=>d.days), task.intervalDays) * 1.1;
   const xp = i => pad.left + i * (cW / (data.length-1));
   const yp = v => pad.top + cH - (v/maxY)*cH;
-  // グリッド
   ctx.strokeStyle="#F0F0F0"; ctx.lineWidth=1;
   [0,0.25,0.5,0.75,1].forEach(r => {
     const y = pad.top + cH*(1-r);
@@ -261,13 +242,11 @@ function drawChart(canvas, task) {
     ctx.fillStyle="#AAA"; ctx.font="9px sans-serif"; ctx.textAlign="right";
     ctx.fillText(Math.round(maxY*r), pad.left-4, y+3);
   });
-  // 目安ライン
   const refY = yp(task.intervalDays);
   ctx.strokeStyle="#F44336"; ctx.lineWidth=1.5; ctx.setLineDash([4,3]);
   ctx.beginPath(); ctx.moveTo(pad.left,refY); ctx.lineTo(pad.left+cW,refY); ctx.stroke();
   ctx.setLineDash([]); ctx.fillStyle="#F44336"; ctx.font="9px sans-serif"; ctx.textAlign="left";
   ctx.fillText("目安", pad.left+cW+2, refY+3);
-  // エリア
   ctx.beginPath();
   ctx.moveTo(xp(0), yp(data[0].days));
   data.forEach((d,i) => { if(i>0) ctx.lineTo(xp(i),yp(d.days)); });
@@ -275,11 +254,9 @@ function drawChart(canvas, task) {
   const grad = ctx.createLinearGradient(0,pad.top,0,pad.top+cH);
   grad.addColorStop(0,"rgba(92,107,192,0.18)"); grad.addColorStop(1,"rgba(92,107,192,0)");
   ctx.fillStyle=grad; ctx.fill();
-  // ライン
   ctx.beginPath(); ctx.strokeStyle="#5C6BC0"; ctx.lineWidth=2;
   data.forEach((d,i) => { i===0?ctx.moveTo(xp(i),yp(d.days)):ctx.lineTo(xp(i),yp(d.days)); });
   ctx.stroke();
-  // ドット（実施日）
   data.forEach((d,i) => {
     if(d.done) {
       ctx.beginPath(); ctx.arc(xp(i),yp(d.days),5,0,Math.PI*2);
@@ -287,22 +264,17 @@ function drawChart(canvas, task) {
       ctx.strokeStyle="#fff"; ctx.lineWidth=2; ctx.stroke();
     }
   });
-  // ★ X軸ラベル（日付+曜日、2行で描画）
   const step = Math.max(1, Math.floor(data.length/5));
   data.forEach((d,i) => {
     if (i % step === 0 || i === data.length-1) {
       const x = xp(i);
-      // ラベルを "/" で分割して日付部と曜日部に分ける
-      // 例: "6/18(木)" → そのまま1行で表示（スペースが足りないので短縮形を使う）
       ctx.fillStyle="#AAA"; ctx.font="9px sans-serif"; ctx.textAlign="center";
-      // 日付だけ（月/日）
       const parts = d.label.match(/^(\d+\/\d+)\((.)\)$/);
       if (parts) {
-        ctx.fillText(parts[1], x, H - 18);       // 例: 6/18
-        // 曜日に色をつける
+        ctx.fillText(parts[1], x, H - 18);
         const wd = parts[2];
         ctx.fillStyle = wd==="日"?"#F44336": wd==="土"?"#2196F3":"#AAA";
-        ctx.fillText(`(${wd})`, x, H - 6);        // 例: (木)
+        ctx.fillText(`(${wd})`, x, H - 6);
         ctx.fillStyle="#AAA";
       } else {
         ctx.fillText(d.label, x, H - 8);
@@ -312,12 +284,14 @@ function drawChart(canvas, task) {
 }
 
 // ── 画面状態 ──
-let currentView = "loading"; // loading / main / chart
+// currentView: "loading" / "main" / "group" / "chart"
+let currentView = "loading";
+let currentGroupId = null;  // group画面で表示中のグループID
 let chartTaskId = null;
+let chartFromGroup = false; // グラフの戻り先フラグ
 let modalType = null;
 let formData = {};
 let showMenu = false;
-let collapsedGroups = {};
 
 // ── レンダリング ──
 function render() {
@@ -338,6 +312,8 @@ function render() {
     const task = findTask(chartTaskId);
     const canvas = document.getElementById("chart-canvas");
     if (task && canvas) { requestAnimationFrame(() => drawChart(canvas, task)); }
+  } else if (currentView === "group") {
+    root.innerHTML = renderGroupScreen();
   } else {
     root.innerHTML = renderMain();
   }
@@ -346,14 +322,42 @@ function render() {
 
 function findTask(id) { for(const g of groups){ const t=g.tasks.find(t=>t.id===id); if(t) return t; } return null; }
 function findGroup(id) { return groups.find(g=>g.id===id); }
-function findGroupByTaskId(taskId) { return groups.find(g => g.tasks.some(t => t.id === taskId)); }
 
-// ── メイン画面 ──
-function renderMain() {
-  const now = new Date();
-  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${"日月火水木金土"[now.getDay()]}）`;
-  const totalAlert = groups.reduce((acc,g)=>acc+g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length,0);
+// ── ヘッダー共通パーツ ──
+function renderHeader({ title, subtitle, backFn, showControls }) {
   const cols = getLayoutCols();
+  const now = new Date();
+  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${WEEKDAYS[now.getDay()]}）`;
+  return `
+  <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:28px 20px 18px;color:#fff;position:relative;">
+    <div style="font-size:11px;opacity:0.55;letter-spacing:1.5px;margin-bottom:4px;">${dateLabel}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;row-gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        ${backFn ? `<button onclick="${backFn}()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:99px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:inherit;">← 戻る</button>` : ""}
+        <div style="font-size:20px;font-weight:700;">${title}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+        ${subtitle ? `<div style="font-size:11px;opacity:0.55;">${subtitle}</div>` : ""}
+        <div class="layout-switcher">
+          <button class="layout-btn${cols===1?" active":""}" onclick="setLayoutCols(1)">1</button>
+          <button class="layout-btn${cols===2?" active":""}" onclick="setLayoutCols(2)">2</button>
+          <button class="layout-btn${cols===3?" active":""}" onclick="setLayoutCols(3)">3</button>
+        </div>
+        ${showControls ? `
+        <button onclick="syncNow()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:15px;cursor:pointer;" title="同期">🔄</button>
+        <button onclick="toggleMenu()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer;">⋮</button>
+        ` : ""}
+      </div>
+    </div>
+  </div>`;
+}
+
+// ── メイン画面（グループ一覧） ──
+function renderMain() {
+  const cols = getLayoutCols();
+  const totalAlert = groups.reduce((acc,g)=>acc+g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length,0);
+  const now = new Date();
+  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${WEEKDAYS[now.getDay()]}）`;
 
   let html = `
   <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:28px 20px 18px;color:#fff;position:relative;">
@@ -371,8 +375,8 @@ function renderMain() {
         <button onclick="toggleMenu()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer;">⋮</button>
       </div>
     </div>
-    <div style="font-size:11px;opacity:0.45;margin-top:4px;">タスク名タップでグラフ・履歴編集</div>
-    ${showMenu?`
+    <div style="font-size:11px;opacity:0.45;margin-top:4px;">グループをタップするとタスク一覧へ</div>
+    ${showMenu ? `
     <div onclick="toggleMenu()" style="position:fixed;inset:0;z-index:100;">
       <div onclick="event.stopPropagation()" style="position:absolute;top:84px;right:16px;background:#fff;border-radius:14px;box-shadow:0 4px 24px rgba(0,0,0,0.15);overflow:hidden;min-width:190px;z-index:101;">
         <button onclick="exportData()" style="width:100%;padding:14px 18px;border:none;background:none;font-size:14px;cursor:pointer;font-family:inherit;text-align:left;color:#333;border-bottom:1px solid #F0F0F0;">📤 バックアップを保存</button>
@@ -381,60 +385,147 @@ function renderMain() {
           <input type="file" accept=".json" onchange="importData(event)" style="display:none;">
         </label>
       </div>
-    </div>`:""}
+    </div>` : ""}
   </div>
   <div style="padding:14px 12px 80px;">`;
 
-  groups.forEach((g, gi) => {
-    html += renderGroup(g, gi, groups.length, cols);
-  });
+  if (cols === 1) {
+    // 1列：リスト形式グループ
+    groups.forEach((g, gi) => { html += renderGroupRow(g, gi, groups.length); });
+  } else {
+    // 2列・3列：グループカードグリッド
+    html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:10px;">`;
+    groups.forEach((g, gi) => { html += renderGroupCard(g, gi, groups.length); });
+    html += `</div>`;
+  }
 
   html += `
-    <button onclick="openModal('addGroup')" style="width:100%;padding:11px;border-radius:12px;border:2px dashed #D0D0D0;background:transparent;color:#C0C0C0;font-size:13px;cursor:pointer;font-family:inherit;margin-top:4px;display:flex;align-items:center;justify-content:center;gap:5px;">
+    <button onclick="openModal('addGroup')" style="width:100%;padding:11px;border-radius:12px;border:2px dashed #D0D0D0;background:transparent;color:#C0C0C0;font-size:13px;cursor:pointer;font-family:inherit;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:5px;">
       <span style="font-size:16px;">＋</span> グループを追加
     </button>
   </div>`;
   return html;
 }
 
-// ★ グループインデックスと総数を受け取り、▲▼ボタンを追加
-function renderGroup(g, gi, totalGroups, cols) {
-  const collapsed = collapsedGroups[g.id];
+// 1列用グループ行
+function renderGroupRow(g, gi, total) {
   const alertCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length;
-
-  let html = `<div style="margin-bottom:10px;">
-    <div style="display:flex;align-items:center;gap:6px;padding:7px 12px;">
-      <div onclick="toggleGroup('${g.id}')" style="display:flex;align-items:center;gap:8px;flex:1;cursor:pointer;min-width:0;">
-        <span style="font-size:15px;">${g.icon}</span>
-        <span style="font-size:12px;font-weight:700;color:#555;flex:1;min-width:0;">${g.name}</span>
-        ${alertCount>0?`<span style="background:#F44336;color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:1px 7px;white-space:nowrap;">${alertCount}</span>`:""}
-        <span style="color:#bbb;font-size:11px;display:inline-block;transform:${collapsed?"rotate(-90deg)":"rotate(0)"};transition:transform 0.2s;">▼</span>
+  const doneCount = g.tasks.filter(t => lastDone(t)===today()).length;
+  return `
+  <div style="background:#fff;border-radius:12px;margin-bottom:8px;box-shadow:0 1px 8px rgba(0,0,0,0.07);overflow:hidden;">
+    <div style="display:flex;align-items:center;gap:8px;padding:12px 14px;">
+      <div onclick="openGroup('${g.id}')" style="display:flex;align-items:center;gap:10px;flex:1;cursor:pointer;min-width:0;">
+        <div style="width:40px;height:40px;border-radius:10px;background:linear-gradient(135deg,#EEF0FF,#E8E0FF);display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0;">${g.icon}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:14px;font-weight:700;color:#1a1a2e;">${g.name}</div>
+          <div style="font-size:11px;color:#AAA;margin-top:2px;">${g.tasks.length}タスク${doneCount>0?` · 今日${doneCount}件完了`:""}</div>
+        </div>
+        ${alertCount>0?`<span style="background:#F44336;color:#fff;border-radius:99px;font-size:11px;font-weight:700;padding:2px 8px;white-space:nowrap;">${alertCount}</span>`:""}
+        <span style="color:#bbb;font-size:13px;">›</span>
       </div>
       <div class="sort-controls">
-        <button class="sort-btn" onclick="moveGroup('${g.id}',-1)" ${gi===0?"disabled":""}  title="グループを上へ">▲</button>
-        <button class="sort-btn" onclick="moveGroup('${g.id}',1)"  ${gi===totalGroups-1?"disabled":""} title="グループを下へ">▼</button>
+        <button class="sort-btn" onclick="moveGroup('${g.id}',-1)" ${gi===0?"disabled":""}>▲</button>
+        <button class="sort-btn" onclick="moveGroup('${g.id}',1)" ${gi===total-1?"disabled":""}>▼</button>
       </div>
-      <button onclick="event.stopPropagation();openModal('editGroup','${g.id}')" style="background:none;border:none;color:#CCC;font-size:12px;cursor:pointer;padding:0 2px;">✏️</button>
-    </div>`;
-
-  if (!collapsed) {
-    if (cols === 1) {
-      // 1列：従来のリスト表示
-      html += `<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 8px rgba(0,0,0,0.07);">`;
-      g.tasks.forEach((t, ti) => { html += renderTaskRow(t, g.id, ti, g.tasks.length); });
-      html += `<button onclick="openModal('addTask','${g.id}')" style="width:100%;padding:9px 12px;border:none;background:#FAFAFA;color:#C0C0C0;font-size:12px;cursor:pointer;font-family:inherit;text-align:left;display:flex;align-items:center;gap:5px;"><span style="font-size:14px;">＋</span> タスクを追加</button></div>`;
-    } else {
-      // 2列・3列：カード形式グリッド
-      html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;">`;
-      g.tasks.forEach((t, ti) => { html += renderTaskCard(t, g.id, ti, g.tasks.length); });
-      html += `</div>`;
-      html += `<button onclick="openModal('addTask','${g.id}')" style="width:100%;padding:9px 12px;border-radius:10px;border:2px dashed #E0E0E0;background:transparent;color:#C0C0C0;font-size:12px;cursor:pointer;font-family:inherit;margin-top:6px;display:flex;align-items:center;justify-content:center;gap:5px;"><span style="font-size:14px;">＋</span> タスクを追加</button>`;
-    }
-  }
-  return html + `</div>`;
+      <button onclick="openModal('editGroup','${g.id}')" style="background:none;border:none;color:#CCC;font-size:14px;cursor:pointer;padding:0 2px;flex-shrink:0;">✏️</button>
+    </div>
+  </div>`;
 }
 
-// ★ 1列用：従来のリスト行（並び替えボタン付き）
+// 2列・3列用グループカード
+function renderGroupCard(g, gi, total) {
+  const alertCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length;
+  const doneCount = g.tasks.filter(t => lastDone(t)===today()).length;
+  const overCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d!==null&&d>=t.intervalDays;}).length;
+  const warnCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));const s=getStatus(d,t.intervalDays);return s==="warn";}).length;
+  // ステータスバー（タスク数をカラー別に可視化）
+  const total2 = g.tasks.length || 1;
+  const goodCount = g.tasks.length - alertCount - warnCount;
+  return `
+  <div style="background:#fff;border-radius:14px;box-shadow:0 1px 8px rgba(0,0,0,0.07);overflow:hidden;display:flex;flex-direction:column;">
+    <div onclick="openGroup('${g.id}')" style="cursor:pointer;padding:14px 12px 10px;flex:1;">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:8px;">
+        <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#EEF0FF,#E8E0FF);display:flex;align-items:center;justify-content:center;font-size:22px;">${g.icon}</div>
+        ${alertCount>0?`<span style="background:#F44336;color:#fff;border-radius:99px;font-size:10px;font-weight:700;padding:2px 7px;">${alertCount}</span>`:""}
+      </div>
+      <div style="font-size:13px;font-weight:700;color:#1a1a2e;margin-bottom:2px;">${g.name}</div>
+      <div style="font-size:10px;color:#AAA;margin-bottom:8px;">${g.tasks.length}タスク${doneCount>0?` · 今日${doneCount}件`:""}</div>
+      <div style="height:4px;border-radius:99px;background:#F0F0F0;overflow:hidden;display:flex;">
+        <div style="width:${overCount/total2*100}%;background:#F44336;"></div>
+        <div style="width:${warnCount/total2*100}%;background:#FF9800;"></div>
+        <div style="width:${goodCount/total2*100}%;background:#4CAF50;"></div>
+      </div>
+    </div>
+    <div style="display:flex;border-top:1px solid #F5F5F5;">
+      <div style="display:flex;gap:2px;padding:6px 8px;flex:1;align-items:center;">
+        <button class="sort-btn" onclick="moveGroup('${g.id}',-1)" ${gi===0?"disabled":""}>◀</button>
+        <button class="sort-btn" onclick="moveGroup('${g.id}',1)" ${gi===total-1?"disabled":""}>▶</button>
+      </div>
+      <button onclick="openModal('editGroup','${g.id}')" style="background:none;border:none;color:#CCC;font-size:13px;cursor:pointer;padding:6px 10px;">✏️</button>
+    </div>
+  </div>`;
+}
+
+// ── グループ内タスク一覧画面 ──
+function openGroup(groupId) {
+  currentGroupId = groupId;
+  currentView = "group";
+  render();
+}
+function closeGroup() {
+  currentView = "main";
+  currentGroupId = null;
+  render();
+}
+
+function renderGroupScreen() {
+  const g = findGroup(currentGroupId);
+  if (!g) { closeGroup(); return ""; }
+  const cols = getLayoutCols();
+  const alertCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length;
+  const now = new Date();
+  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${WEEKDAYS[now.getDay()]}）`;
+
+  let html = `
+  <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:28px 20px 18px;color:#fff;position:relative;">
+    <div style="font-size:11px;opacity:0.55;letter-spacing:1.5px;margin-bottom:4px;">${dateLabel}</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;row-gap:8px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button onclick="closeGroup()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:99px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:inherit;">← 戻る</button>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:22px;">${g.icon}</span>
+          <span style="font-size:20px;font-weight:700;">${g.name}</span>
+          ${alertCount>0?`<span style="background:#F44336;color:#fff;border-radius:99px;font-size:11px;font-weight:700;padding:2px 8px;">${alertCount}</span>`:""}
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="layout-switcher">
+          <button class="layout-btn${cols===1?" active":""}" onclick="setLayoutCols(1)">1</button>
+          <button class="layout-btn${cols===2?" active":""}" onclick="setLayoutCols(2)">2</button>
+          <button class="layout-btn${cols===3?" active":""}" onclick="setLayoutCols(3)">3</button>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:11px;opacity:0.45;margin-top:4px;">タスク名タップでグラフ・履歴編集</div>
+  </div>
+  <div style="padding:14px 12px 80px;">`;
+
+  if (cols === 1) {
+    html += `<div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 8px rgba(0,0,0,0.07);">`;
+    g.tasks.forEach((t, ti) => { html += renderTaskRow(t, g.id, ti, g.tasks.length); });
+    html += `<button onclick="openModal('addTask','${g.id}')" style="width:100%;padding:9px 12px;border:none;background:#FAFAFA;color:#C0C0C0;font-size:12px;cursor:pointer;font-family:inherit;text-align:left;display:flex;align-items:center;gap:5px;"><span style="font-size:14px;">＋</span> タスクを追加</button></div>`;
+  } else {
+    html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px;">`;
+    g.tasks.forEach((t, ti) => { html += renderTaskCard(t, g.id, ti, g.tasks.length); });
+    html += `</div>`;
+    html += `<button onclick="openModal('addTask','${g.id}')" style="width:100%;padding:9px 12px;border-radius:10px;border:2px dashed #E0E0E0;background:transparent;color:#C0C0C0;font-size:12px;cursor:pointer;font-family:inherit;margin-top:8px;display:flex;align-items:center;justify-content:center;gap:5px;"><span style="font-size:14px;">＋</span> タスクを追加</button>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// ── タスク行（1列用） ──
 function renderTaskRow(task, groupId, ti, totalTasks) {
   const last = lastDone(task);
   const days = daysSince(last);
@@ -446,8 +537,8 @@ function renderTaskRow(task, groupId, ti, totalTasks) {
   return `
   <div style="display:flex;align-items:center;gap:6px;padding:9px 10px;background:#fff;border-bottom:1px solid #F5F5F5;">
     <div class="sort-controls">
-      <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',-1)" ${ti===0?"disabled":""} title="タスクを上へ">▲</button>
-      <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',1)"  ${ti===totalTasks-1?"disabled":""} title="タスクを下へ">▼</button>
+      <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',-1)" ${ti===0?"disabled":""}>▲</button>
+      <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',1)" ${ti===totalTasks-1?"disabled":""}>▼</button>
     </div>
     <div style="position:relative;flex-shrink:0;">
       <div style="width:34px;height:34px;border-radius:9px;background:${doneToday?"#E8F5E9":cfg.bg};display:flex;align-items:center;justify-content:center;font-size:17px;">${doneToday?"✅":task.icon}</div>
@@ -472,7 +563,7 @@ function renderTaskRow(task, groupId, ti, totalTasks) {
   </div>`;
 }
 
-// ★ 2列・3列用：カード表示（並び替えボタン付き）
+// ── タスクカード（2列・3列用） ──
 function renderTaskCard(task, groupId, ti, totalTasks) {
   const last = lastDone(task);
   const days = daysSince(last);
@@ -490,7 +581,7 @@ function renderTaskCard(task, groupId, ti, totalTasks) {
       </div>
       <div class="sort-controls" style="flex-direction:row;">
         <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',-1)" ${ti===0?"disabled":""}>◀</button>
-        <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',1)"  ${ti===totalTasks-1?"disabled":""}>▶</button>
+        <button class="sort-btn" onclick="moveTask('${groupId}','${task.id}',1)" ${ti===totalTasks-1?"disabled":""}>▶</button>
       </div>
       <button onclick="openModal('editTask','${task.id}')" style="width:20px;height:20px;border-radius:5px;border:none;background:none;cursor:pointer;color:#CCC;font-size:12px;padding:0;flex-shrink:0;">⋯</button>
     </div>
@@ -597,7 +688,6 @@ function pBtn() { return "width:100%;padding:13px;border-radius:12px;border:none
 
 // ── イベントハンドラ ──
 function toggleMenu() { showMenu=!showMenu; render(); }
-function toggleGroup(id) { collapsedGroups[id]=!collapsedGroups[id]; render(); }
 
 function handleDone(taskId) {
   const td=today();
@@ -614,8 +704,18 @@ function toggleDate(taskId,date,add) {
 }
 function onDateChange(val) { formData.selectedDate=val; render(); }
 
-function openChart(taskId) { chartTaskId=taskId; formData={selectedDate:today()}; currentView="chart"; render(); }
-function closeChart() { currentView="main"; chartTaskId=null; render(); }
+function openChart(taskId) {
+  chartTaskId=taskId;
+  chartFromGroup = (currentView === "group");
+  formData={selectedDate:today()};
+  currentView="chart";
+  render();
+}
+function closeChart() {
+  currentView = chartFromGroup ? "group" : "main";
+  chartTaskId=null;
+  render();
+}
 
 function openModal(type,id) {
   showMenu=false; modalType=type; formData={};
@@ -653,7 +753,6 @@ async function syncNow() {
   render();
   showToast("✅ 同期しました");
 }
-
 function exportData() {
   const json=JSON.stringify(groups,null,2);
   const blob=new Blob([json],{type:"application/json"});
