@@ -328,79 +328,49 @@ function drawChart(canvas, task) {
 }
 
 // ── カレンダー描画 ──
+// monthCount: 表示月数（1/2/3）
+// calMonths は画面状態として管理
+let calMonths = 2;
+
+function setCalMonths(n) { calMonths = n; render(); }
+
+// 1か月分のカレンダーHTMLを返す（コンパクト版）
 function renderMonthCalendar(year, month, historySet, taskId) {
   const todayStr = today();
-  const monthLabel = `${year}年${month+1}月`;
-  // 1日の曜日（0=日）
+  const monthLabel = `${month+1}月`;
   const firstDay = new Date(year, month, 1).getDay();
-  // 月の総日数
   const daysInMonth = new Date(year, month+1, 0).getDate();
-  // 今月の実施回数
   const doneCount = [...historySet].filter(d => d.startsWith(`${year}-${String(month+1).padStart(2,'0')}`)).length;
 
   let cells = '';
-  // 空白セル（月初前）
-  for (let i = 0; i < firstDay; i++) {
-    cells += `<div></div>`;
-  }
+  for (let i = 0; i < firstDay; i++) { cells += `<div></div>`; }
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const done = historySet.has(ds);
     const isToday = ds === todayStr;
     const isFuture = ds > todayStr;
-    const dow = (firstDay + d - 1) % 7; // 0=日,6=土
-    const isSun = dow === 0;
-    const isSat = dow === 6;
-
-    // 文字色
+    const dow = (firstDay + d - 1) % 7;
     let textColor = '#1a1a2e';
     if (isFuture) textColor = '#CCCCCC';
-    else if (isSun) textColor = '#E53935';
-    else if (isSat) textColor = '#1565C0';
-
-    // 背景・スタイル
-    let bg = 'transparent';
-    let fontWeight = '400';
-    let borderRadius = '50%';
-    let border = 'none';
-    if (done) {
-      bg = '#43A047';
-      textColor = '#fff';
-      fontWeight = '700';
-    } else if (isToday) {
-      border = '2px solid #5C6BC0';
-      textColor = '#5C6BC0';
-      fontWeight = '700';
-    }
-
-    // タップで記録追加/削除（過去・今日のみ）
-    const onclick = !isFuture
-      ? `onclick="toggleDate('${taskId}','${ds}',${!done})"`
-      : '';
-
-    cells += `<div ${onclick} style="
-      aspect-ratio:1;
-      display:flex;align-items:center;justify-content:center;
-      font-size:13px;font-weight:${fontWeight};
-      color:${textColor};
-      background:${bg};
-      border-radius:${borderRadius};
-      border:${border};
-      cursor:${isFuture?'default':'pointer'};
-      box-sizing:border-box;
-    ">${d}</div>`;
+    else if (dow === 0) textColor = '#E53935';
+    else if (dow === 6) textColor = '#1565C0';
+    let bg = 'transparent', fontWeight = '400', border = 'none';
+    if (done) { bg = '#43A047'; textColor = '#fff'; fontWeight = '700'; }
+    else if (isToday) { border = '1.5px solid #5C6BC0'; textColor = '#5C6BC0'; fontWeight = '700'; }
+    const onclick = !isFuture ? `onclick="toggleDate('${taskId}','${ds}',${!done})"` : '';
+    cells += `<div ${onclick} style="aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:${fontWeight};color:${textColor};background:${bg};border-radius:50%;border:${border};cursor:${isFuture?'default':'pointer'};box-sizing:border-box;">${d}</div>`;
   }
 
   return `
-  <div style="background:#fff;border-radius:14px;padding:14px 12px;box-shadow:0 1px 8px rgba(0,0,0,0.07);margin-bottom:12px;">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-      <div style="font-size:13px;font-weight:700;color:#333;">${monthLabel}</div>
-      <div style="font-size:11px;color:#43A047;font-weight:600;">${doneCount > 0 ? `${doneCount}回実施` : ''}</div>
+  <div style="flex:1;min-width:0;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:3px;">
+      <div style="font-size:10px;font-weight:700;color:#555;">${monthLabel}</div>
+      <div style="font-size:9px;color:#43A047;font-weight:600;">${doneCount > 0 ? `${doneCount}回` : ''}</div>
     </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:6px;">
-      ${['日','月','火','水','木','金','土'].map((w,i)=>`<div style="text-align:center;font-size:10px;font-weight:600;color:${i===0?'#E53935':i===6?'#1565C0':'#AAA'};padding-bottom:4px;">${w}</div>`).join('')}
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:2px;">
+      ${['日','月','火','水','木','金','土'].map((w,i)=>`<div style="text-align:center;font-size:7px;font-weight:600;color:${i===0?'#E53935':i===6?'#1565C0':'#BBB'};">${w}</div>`).join('')}
     </div>
-    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;">
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;">
       ${cells}
     </div>
   </div>`;
@@ -703,14 +673,29 @@ function renderChartScreen() {
   const selDate = formData.selectedDate || today();
   const isDone = (task.history||[]).includes(selDate);
 
-  // 先月・今月のカレンダーを生成
+  // カレンダーを生成（calMonths月分、横並び）
   const histSet = new Set(task.history || []);
   const now = new Date();
   const thisYear = now.getFullYear(), thisMonth = now.getMonth();
-  const prevDate = new Date(thisYear, thisMonth - 1, 1);
-  const calHtml =
-    renderMonthCalendar(prevDate.getFullYear(), prevDate.getMonth(), histSet, task.id) +
-    renderMonthCalendar(thisYear, thisMonth, histSet, task.id);
+  let calCells = '';
+  for (let i = calMonths - 1; i >= 0; i--) {
+    const d = new Date(thisYear, thisMonth - i, 1);
+    calCells += renderMonthCalendar(d.getFullYear(), d.getMonth(), histSet, task.id);
+  }
+  const calHtml = `
+  <div style="background:#fff;border-radius:12px;padding:10px;box-shadow:0 1px 8px rgba(0,0,0,0.07);margin-bottom:12px;">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div style="font-size:11px;color:#999;">実施カレンダー　<span style="color:#bbb;font-size:10px;">（タップで記録追加/削除）</span></div>
+      <div style="display:flex;gap:3px;">
+        <button onclick="setCalMonths(1)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===1?'#5C6BC0':'#F0F0F0'};color:${calMonths===1?'#fff':'#888'};">1</button>
+        <button onclick="setCalMonths(2)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===2?'#5C6BC0':'#F0F0F0'};color:${calMonths===2?'#fff':'#888'};">2</button>
+        <button onclick="setCalMonths(3)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===3?'#5C6BC0':'#F0F0F0'};color:${calMonths===3?'#fff':'#888'};">3</button>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:flex-start;">
+      ${calCells}
+    </div>
+  </div>`;
 
   return `
   <div style="display:flex;flex-direction:column;height:100vh;background:#F4F6FA;">
@@ -730,9 +715,8 @@ function renderChartScreen() {
       </div>
     </div>
     <div style="flex:1;overflow-y:auto;padding:16px 12px 32px;">
-      <div style="font-size:11px;color:#999;margin-bottom:8px;">実施カレンダー　<span style="color:#bbb;">（日付をタップで記録追加/削除）</span></div>
       ${calHtml}
-      <div style="font-size:11px;color:#999;margin-bottom:8px;margin-top:8px;">経過日数の推移</div>
+      <div style="font-size:11px;color:#999;margin-bottom:8px;margin-top:4px;">経過日数の推移</div>
       <div style="background:#fff;border-radius:14px;padding:14px 8px 8px;box-shadow:0 1px 8px rgba(0,0,0,0.07);margin-bottom:16px;">
         <canvas id="chart-canvas" style="width:100%;display:block;"></canvas>
       </div>
