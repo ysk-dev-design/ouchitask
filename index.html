@@ -85,6 +85,10 @@ function lastDone(task) {
   if (!task.history || !task.history.length) return null;
   return [...task.history].sort().slice(-1)[0];
 }
+// [CHANGED] タスクのupdatedAtを現在時刻で更新して返す
+function touchTask(task) {
+  return { ...task, updatedAt: new Date().toISOString() };
+}
 
 const STATUS = {
   good:{ bar:"#4CAF50", bg:"#E8F5E9", text:"#2E7D32", label:"良好" },
@@ -98,13 +102,50 @@ let groups = [];
 let isSyncing = false;
 let pendingSave = false;
 
+// [CHANGED] GASから返ってきたデータを正規化（updatedAtがなければ古いデータとして空文字を付与）
+function normalizeGroups(parsed) {
+  return parsed.map(g => ({
+    ...g,
+    tasks: g.tasks.map(t => ({
+      ...t,
+      history: t.history || [],
+      updatedAt: t.updatedAt || ""
+    }))
+  }));
+}
+
+// [CHANGED] 2つのグループ配列をタスク単位のupdatedAtで比較してマージする
+// - グループ・タスクの追加/削除/並び順はincoming（送信元）を優先
+// - 各タスクのhistory/updatedAtはupdatedAtが新しいほうを採用
+function mergeGroups(base, incoming) {
+  // baseのタスクをidでMapに変換
+  const baseTaskMap = {};
+  (base || []).forEach(g => {
+    (g.tasks || []).forEach(t => { baseTaskMap[t.id] = t; });
+  });
+
+  return (incoming || []).map(inGroup => ({
+    ...inGroup,
+    tasks: (inGroup.tasks || []).map(inTask => {
+      const baseTask = baseTaskMap[inTask.id];
+      if (!baseTask) return inTask; // 新規タスクはそのまま
+      // updatedAtが新しいほうを採用（同じか不明な場合はincomingを優先）
+      const baseTime = baseTask.updatedAt || "";
+      const inTime   = inTask.updatedAt   || "";
+      return inTime >= baseTime ? inTask : baseTask;
+    })
+  }));
+}
+
 async function loadFromCloud() {
   try {
     const res = await fetch(SCRIPT_URL, { redirect:"follow" });
     const text = await res.text();
     const parsed = JSON.parse(text);
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      groups = parsed.map(g => ({ ...g, tasks: g.tasks.map(t => ({ ...t, history: t.history || [] })) }));
+    // [CHANGED] GASが { data:[...] } 形式で返す場合も配列直返しも両対応
+    const raw = Array.isArray(parsed) ? parsed : (parsed.data || []);
+    if (Array.isArray(raw) && raw.length > 0) {
+      groups = normalizeGroups(raw);
     } else {
       loadLocal();
       await saveToCloud();
@@ -117,6 +158,8 @@ async function loadFromCloud() {
     return false;
   }
 }
+
+// [CHANGED] POSTのbodyを { data: groups } 形式に変更
 async function saveToCloud() {
   if (isSyncing) { pendingSave = true; return; }
   isSyncing = true;
@@ -124,18 +167,19 @@ async function saveToCloud() {
     await fetch(SCRIPT_URL, {
       method:"POST", redirect:"follow",
       headers:{ "Content-Type":"text/plain" },
-      body: JSON.stringify(groups)
+      body: JSON.stringify({ data: groups })
     });
   } catch(e) { console.warn("クラウド保存失敗:", e); }
   isSyncing = false;
   if (pendingSave) { pendingSave = false; saveToCloud(); }
 }
+
 function loadLocal() {
   try {
     const s = localStorage.getItem(LOCAL_KEY);
     if (s) {
       const parsed = JSON.parse(s);
-      groups = parsed.map(g => ({ ...g, tasks: g.tasks.map(t => ({ ...t, history: t.history || (t.lastDone ? [t.lastDone] : []) })) }));
+      groups = parsed.map(g => ({ ...g, tasks: g.tasks.map(t => ({ ...t, history: t.history || (t.lastDone ? [t.lastDone] : []), updatedAt: t.updatedAt || "" })) }));
       return;
     }
   } catch {}
@@ -284,11 +328,10 @@ function drawChart(canvas, task) {
 }
 
 // ── 画面状態 ──
-// currentView: "loading" / "main" / "group" / "chart"
 let currentView = "loading";
-let currentGroupId = null;  // group画面で表示中のグループID
+let currentGroupId = null;
 let chartTaskId = null;
-let chartFromGroup = false; // グラフの戻り先フラグ
+let chartFromGroup = false;
 let modalType = null;
 let formData = {};
 let showMenu = false;
@@ -322,37 +365,6 @@ function render() {
 
 function findTask(id) { for(const g of groups){ const t=g.tasks.find(t=>t.id===id); if(t) return t; } return null; }
 function findGroup(id) { return groups.find(g=>g.id===id); }
-
-// ── ヘッダー共通パーツ ──
-function renderHeader({ title, subtitle, backFn, showControls }) {
-  const cols = getLayoutCols();
-  const now = new Date();
-  const dateLabel = `${now.getMonth()+1}月${now.getDate()}日（${WEEKDAYS[now.getDay()]}）`;
-  return `
-  <div style="background:linear-gradient(135deg,#2D3748,#4A5568);padding:28px 20px 18px;color:#fff;position:relative;">
-    <div style="font-size:11px;opacity:0.55;letter-spacing:1.5px;margin-bottom:4px;">${dateLabel}</div>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;row-gap:8px;">
-      <div style="display:flex;align-items:center;gap:8px;">
-        ${backFn ? `<button onclick="${backFn}()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;border-radius:99px;padding:5px 12px;font-size:13px;cursor:pointer;font-family:inherit;">← 戻る</button>` : ""}
-        <div style="font-size:20px;font-weight:700;">${title}</div>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-        ${subtitle ? `<div style="font-size:11px;opacity:0.55;">${subtitle}</div>` : ""}
-        <div class="layout-switcher">
-          <button class="layout-btn${cols===1?" active":""}" onclick="setLayoutCols(1)">1</button>
-          <button class="layout-btn${cols===2?" active":""}" onclick="setLayoutCols(2)">2</button>
-          <button class="layout-btn${cols===3?" active":""}" onclick="setLayoutCols(3)">3</button>
-          <button class="layout-btn${cols===4?" active":""}" onclick="setLayoutCols(4)">4</button>
-          <button class="layout-btn${cols===5?" active":""}" onclick="setLayoutCols(5)">5</button>
-        </div>
-        ${showControls ? `
-        <button onclick="syncNow()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:15px;cursor:pointer;" title="同期">🔄</button>
-        <button onclick="toggleMenu()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:34px;height:34px;border-radius:50%;font-size:18px;cursor:pointer;">⋮</button>
-        ` : ""}
-      </div>
-    </div>
-  </div>`;
-}
 
 // ── メイン画面（グループ一覧） ──
 function renderMain() {
@@ -394,10 +406,8 @@ function renderMain() {
   <div style="padding:14px 12px 80px;">`;
 
   if (cols === 1) {
-    // 1列：リスト形式グループ
     groups.forEach((g, gi) => { html += renderGroupRow(g, gi, groups.length); });
   } else {
-    // 2列・3列：グループカードグリッド
     html += `<div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:10px;">`;
     groups.forEach((g, gi) => { html += renderGroupCard(g, gi, groups.length); });
     html += `</div>`;
@@ -411,7 +421,6 @@ function renderMain() {
   return html;
 }
 
-// 1列用グループ行
 function renderGroupRow(g, gi, total) {
   const alertCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length;
   const doneCount = g.tasks.filter(t => lastDone(t)===today()).length;
@@ -436,13 +445,11 @@ function renderGroupRow(g, gi, total) {
   </div>`;
 }
 
-// 2列・3列用グループカード
 function renderGroupCard(g, gi, total) {
   const alertCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d===null||d>=t.intervalDays;}).length;
   const doneCount = g.tasks.filter(t => lastDone(t)===today()).length;
   const overCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));return d!==null&&d>=t.intervalDays;}).length;
   const warnCount = g.tasks.filter(t=>{const d=daysSince(lastDone(t));const s=getStatus(d,t.intervalDays);return s==="warn";}).length;
-  // ステータスバー（タスク数をカラー別に可視化）
   const total2 = g.tasks.length || 1;
   const goodCount = g.tasks.length - alertCount - warnCount;
   return `
@@ -531,7 +538,6 @@ function renderGroupScreen() {
   return html;
 }
 
-// ── タスク行（1列用） ──
 function renderTaskRow(task, groupId, ti, totalTasks) {
   const last = lastDone(task);
   const days = daysSince(last);
@@ -569,7 +575,6 @@ function renderTaskRow(task, groupId, ti, totalTasks) {
   </div>`;
 }
 
-// ── タスクカード（2列・3列用） ──
 function renderTaskCard(task, groupId, ti, totalTasks) {
   const last = lastDone(task);
   const days = daysSince(last);
@@ -695,19 +700,43 @@ function pBtn() { return "width:100%;padding:13px;border-radius:12px;border:none
 // ── イベントハンドラ ──
 function toggleMenu() { showMenu=!showMenu; render(); }
 
+// [CHANGED] 完了・取消・日付操作すべてで updatedAt を更新
 function handleDone(taskId) {
-  const td=today();
-  groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===taskId?{...t,history:t.history.includes(td)?t.history:[...t.history,td]}:t)}));
+  const td = today();
+  const now = new Date().toISOString();
+  groups = groups.map(g => ({...g, tasks: g.tasks.map(t =>
+    t.id === taskId
+      ? {...t, history: t.history.includes(td) ? t.history : [...t.history, td], updatedAt: now}
+      : t
+  )}));
   saveGroups(); render(); showToast("✅ 記録しました！");
 }
+
 function handleUndo(taskId) {
-  groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===taskId?{...t,history:t.history.filter(d=>d!==today())}:t)}));
+  const now = new Date().toISOString();
+  groups = groups.map(g => ({...g, tasks: g.tasks.map(t =>
+    t.id === taskId
+      ? {...t, history: t.history.filter(d => d !== today()), updatedAt: now}
+      : t
+  )}));
   saveGroups(); render(); showToast("↩️ 取り消しました");
 }
-function toggleDate(taskId,date,add) {
-  groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===taskId?{...t,history:add?(t.history.includes(date)?t.history:[...t.history,date]):t.history.filter(d=>d!==date)}:t)}));
-  saveGroups(); showToast(add?`✅ ${fmtDate(date)} を記録しました`:`🗑️ ${fmtDate(date)} の記録を削除しました`); render();
+
+function toggleDate(taskId, date, add) {
+  const now = new Date().toISOString();
+  groups = groups.map(g => ({...g, tasks: g.tasks.map(t =>
+    t.id === taskId
+      ? {...t,
+          history: add
+            ? (t.history.includes(date) ? t.history : [...t.history, date])
+            : t.history.filter(d => d !== date),
+          updatedAt: now
+        }
+      : t
+  )}));
+  saveGroups(); showToast(add ? `✅ ${fmtDate(date)} を記録しました` : `🗑️ ${fmtDate(date)} の記録を削除しました`); render();
 }
+
 function onDateChange(val) { formData.selectedDate=val; render(); }
 
 function openChart(taskId) {
@@ -732,13 +761,15 @@ function openModal(type,id) {
 }
 function closeModal() { modalType=null; formData={}; render(); }
 
+// [CHANGED] タスク編集時にも updatedAt を更新
 function submitModal() {
+  const now = new Date().toISOString();
   if (modalType==="addTask") {
     if (!formData.name||!formData.name.trim()) return;
-    const t={id:uid(),name:formData.name.trim(),icon:formData.icon||"📋",intervalDays:parseInt(formData.intervalDays)||7,history:[]};
+    const t={id:uid(),name:formData.name.trim(),icon:formData.icon||"📋",intervalDays:parseInt(formData.intervalDays)||7,history:[],updatedAt:now};
     groups=groups.map(g=>g.id===formData.groupId?{...g,tasks:[...g.tasks,t]}:g);
   } else if (modalType==="editTask") {
-    groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===formData.id?{...t,name:formData.name,icon:formData.icon,intervalDays:parseInt(formData.intervalDays)||7}:t)}));
+    groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===formData.id?{...t,name:formData.name,icon:formData.icon,intervalDays:parseInt(formData.intervalDays)||7,updatedAt:now}:t)}));
   } else if (modalType==="addGroup") {
     if (!formData.name||!formData.name.trim()) return;
     groups=[...groups,{id:uid(),name:formData.name.trim(),icon:formData.icon||"📁",tasks:[]}];
@@ -747,6 +778,7 @@ function submitModal() {
   }
   saveGroups(); closeModal();
 }
+
 function deleteItem() {
   if (modalType==="editTask") groups=groups.map(g=>({...g,tasks:g.tasks.filter(t=>t.id!==formData.id)}));
   else if (modalType==="editGroup") groups=groups.filter(g=>g.id!==formData.id);
@@ -759,6 +791,7 @@ async function syncNow() {
   render();
   showToast("✅ 同期しました");
 }
+
 function exportData() {
   const json=JSON.stringify(groups,null,2);
   const blob=new Blob([json],{type:"application/json"});
@@ -768,6 +801,7 @@ function exportData() {
   URL.revokeObjectURL(url);
   showMenu=false; render(); showToast("📤 バックアップを保存しました");
 }
+
 function importData(e) {
   const file=e.target.files[0]; if(!file) return;
   const reader=new FileReader();
