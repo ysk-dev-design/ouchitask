@@ -328,32 +328,43 @@ function drawChart(canvas, task) {
 }
 
 // ── カレンダー描画 ──
-// monthCount: 表示月数（1/2/3）
-// calMonths は画面状態として管理
+// calMonths は画面状態として管理（1〜5）
 let calMonths = 2;
 
 function setCalMonths(n) { calMonths = n; render(); }
 
-// 1か月分のカレンダーHTMLを返す（コンパクト版）
+// 月曜始まりの曜日ラベルと色（0=月...5=土,6=日）
+const CAL_DOW_LABELS = ['月','火','水','木','金','土','日'];
+function dowColor(i) {
+  if (i === 5) return '#1565C0'; // 土
+  if (i === 6) return '#E53935'; // 日
+  return '#BBB';
+}
+
+// 1か月分のカレンダーHTMLを返す（コンパクト・月曜始まり版）
 function renderMonthCalendar(year, month, historySet, taskId) {
   const todayStr = today();
   const monthLabel = `${month+1}月`;
-  const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month+1, 0).getDate();
   const doneCount = [...historySet].filter(d => d.startsWith(`${year}-${String(month+1).padStart(2,'0')}`)).length;
 
+  // 月曜始まりの空白数
+  const firstDow = new Date(year, month, 1).getDay(); // 0=日,1=月...6=土
+  const blankCount = (firstDow === 0) ? 6 : firstDow - 1;
+
   let cells = '';
-  for (let i = 0; i < firstDay; i++) { cells += `<div></div>`; }
+  for (let i = 0; i < blankCount; i++) { cells += `<div></div>`; }
   for (let d = 1; d <= daysInMonth; d++) {
     const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const done = historySet.has(ds);
     const isToday = ds === todayStr;
     const isFuture = ds > todayStr;
-    const dow = (firstDay + d - 1) % 7;
+    const rawDow = new Date(year, month, d).getDay();
+    const dowIdx = (rawDow === 0) ? 6 : rawDow - 1; // 0=月...5=土,6=日
     let textColor = '#1a1a2e';
     if (isFuture) textColor = '#CCCCCC';
-    else if (dow === 0) textColor = '#E53935';
-    else if (dow === 6) textColor = '#1565C0';
+    else if (dowIdx === 5) textColor = '#1565C0'; // 土
+    else if (dowIdx === 6) textColor = '#E53935'; // 日
     let bg = 'transparent', fontWeight = '400', border = 'none';
     if (done) { bg = '#43A047'; textColor = '#fff'; fontWeight = '700'; }
     else if (isToday) { border = '1.5px solid #5C6BC0'; textColor = '#5C6BC0'; fontWeight = '700'; }
@@ -368,7 +379,7 @@ function renderMonthCalendar(year, month, historySet, taskId) {
       <div style="font-size:9px;color:#43A047;font-weight:600;">${doneCount > 0 ? `${doneCount}回` : ''}</div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;margin-bottom:2px;">
-      ${['日','月','火','水','木','金','土'].map((w,i)=>`<div style="text-align:center;font-size:7px;font-weight:600;color:${i===0?'#E53935':i===6?'#1565C0':'#BBB'};">${w}</div>`).join('')}
+      ${CAL_DOW_LABELS.map((w,i)=>`<div style="text-align:center;font-size:7px;font-weight:600;color:${dowColor(i)};">${w}</div>`).join('')}
     </div>
     <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;">
       ${cells}
@@ -687,9 +698,7 @@ function renderChartScreen() {
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
       <div style="font-size:11px;color:#999;">実施カレンダー　<span style="color:#bbb;font-size:10px;">（タップで記録追加/削除）</span></div>
       <div style="display:flex;gap:3px;">
-        <button onclick="setCalMonths(1)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===1?'#5C6BC0':'#F0F0F0'};color:${calMonths===1?'#fff':'#888'};">1</button>
-        <button onclick="setCalMonths(2)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===2?'#5C6BC0':'#F0F0F0'};color:${calMonths===2?'#fff':'#888'};">2</button>
-        <button onclick="setCalMonths(3)" style="padding:3px 8px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===3?'#5C6BC0':'#F0F0F0'};color:${calMonths===3?'#fff':'#888'};">3</button>
+        ${[1,2,3,4,5].map(n=>`<button onclick="setCalMonths(${n})" style="padding:3px 7px;border-radius:6px;border:none;font-size:11px;font-family:inherit;cursor:pointer;font-weight:600;background:${calMonths===n?'#5C6BC0':'#F0F0F0'};color:${calMonths===n?'#fff':'#888'};">${n}</button>`).join('')}
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:flex-start;">
