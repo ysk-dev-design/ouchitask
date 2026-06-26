@@ -907,6 +907,24 @@ function importData(e) {
   currentView = "main";
   render();
 })();
+
+// ── 自動同期：画面が表示状態に戻ったとき ──
+let lastSyncTime = Date.now();
+async function autoSync(silent) {
+  lastSyncTime = Date.now();
+  const ok = await loadFromCloud();
+  if (ok) { render(); if (!silent) showToast("🔄 データを更新しました"); }
+}
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible") return;
+  if (Date.now() - lastSyncTime < 30000) return; // 30秒以内は無視
+  autoSync(false);
+});
+
+// ── 自動同期：1時間ごと（開きっぱなし対策） ──
+setInterval(() => {
+  autoSync(true); // トーストなしで静かに同期
+}, 60 * 60 * 1000);
 </script>
 </body>
 </html>
