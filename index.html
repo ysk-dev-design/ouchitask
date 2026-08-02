@@ -90,6 +90,68 @@ function touchTask(task) {
   return { ...task, updatedAt: new Date().toISOString() };
 }
 
+// ── 特定日タスク用ユーティリティ ──
+function getDeadlineInfo(task) {
+  if (task.type !== 'dates' || !task.deadlines || !task.deadlines.length) return null;
+  const todayStr = today();
+  const todayDate = new Date(todayStr); todayDate.setHours(0,0,0,0);
+  const thisYear = todayDate.getFullYear();
+  let candidates = [];
+  task.deadlines.forEach(dl => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dl)) {
+      candidates.push(dl);
+    } else if (/^\d{2}-\d{2}$/.test(dl)) {
+      candidates.push(thisYear + '-' + dl);
+      candidates.push((thisYear+1) + '-' + dl);
+    }
+  });
+  candidates.sort();
+  let next = candidates.find(d => d >= todayStr);
+  if (!next) next = candidates[candidates.length - 1];
+  const nextDate = new Date(next); nextDate.setHours(0,0,0,0);
+  const diffDays = Math.floor((nextDate - todayDate) / 86400000);
+  return { nextDeadline: next, daysLeft: diffDays };
+}
+
+function getDeadlineStatus(daysLeft) {
+  if (daysLeft === null || daysLeft === undefined) return 'none';
+  if (daysLeft < 0) return 'over';
+  if (daysLeft <= 7) return 'warn';
+  return 'good';
+}
+
+function getTaskDisplayInfo(task) {
+  if (task.type === 'dates') {
+    const info = getDeadlineInfo(task);
+    if (!info) return { status:'none', cfg:STATUS['none'], progressPct:0, labelMain:'期限未設定', labelSub:'', doneToday:false };
+    const { nextDeadline, daysLeft } = info;
+    const status = getDeadlineStatus(daysLeft);
+    const cfg = STATUS[status];
+    const progressPct = daysLeft >= 0 ? Math.min((30 - daysLeft) / 30, 1) * 100 : 100;
+    const fmtDl = fmtDate(nextDeadline);
+    let labelMain = '';
+    if (daysLeft > 0) labelMain = 'あと' + daysLeft + '日（' + fmtDl + '期限）';
+    else if (daysLeft === 0) labelMain = '今日が期限（' + fmtDl + '）';
+    else labelMain = fmtDl + ' 期限 ' + Math.abs(daysLeft) + '日超過';
+    return { status, cfg, progressPct, labelMain, labelSub: fmtDl, doneToday: (task.history||[]).includes(today()), nextDeadline };
+  } else {
+    const last = lastDone(task);
+    const days = daysSince(last);
+    const status = getStatus(days, task.intervalDays);
+    const cfg = STATUS[status];
+    const progress = days===null ? 0 : Math.min(days/task.intervalDays, 1);
+    const daysLeft = days===null ? null : task.intervalDays - days;
+    const doneToday = last === today();
+    let labelMain = '';
+    if (doneToday) labelMain = '今日実施済み ✓';
+    else if (days===null) labelMain = '未実施';
+    else if (daysLeft > 0) labelMain = days + '日前（あと' + daysLeft + '日）';
+    else labelMain = days + '日前（' + (-daysLeft) + '日超過）';
+    const labelSub = (!doneToday && last) ? fmtDate(last) : '';
+    return { status, cfg, progressPct: progress*100, labelMain, labelSub, doneToday };
+  }
+}
+
 const STATUS = {
   good:{ bar:"#4CAF50", bg:"#E8F5E9", text:"#2E7D32", label:"良好" },
   warn:{ bar:"#FF9800", bg:"#FFF3E0", text:"#E65100", label:"もうすぐ" },
@@ -599,13 +661,9 @@ function renderGroupScreen() {
 }
 
 function renderTaskRow(task, groupId, ti, totalTasks) {
-  const last = lastDone(task);
-  const days = daysSince(last);
-  const status = getStatus(days, task.intervalDays);
-  const cfg = STATUS[status];
-  const progress = days===null?0:Math.min(days/task.intervalDays,1);
-  const daysLeft = days===null?null:task.intervalDays-days;
-  const doneToday = last===today();
+  const di = getTaskDisplayInfo(task);
+  const { cfg, progressPct, labelMain, labelSub, doneToday } = di;
+  const subLabel = task.type === 'dates' ? '📅特定日' : task.intervalDays + '日';
   return `
   <div style="display:flex;align-items:center;gap:6px;padding:9px 10px;background:#fff;border-bottom:1px solid #F5F5F5;">
     <div class="sort-controls">
@@ -619,14 +677,14 @@ function renderTaskRow(task, groupId, ti, totalTasks) {
     <div onclick="openChart('${task.id}')" style="flex:1;min-width:0;cursor:pointer;">
       <div style="display:flex;align-items:baseline;gap:5px;">
         <span style="font-size:13px;font-weight:600;color:#1a1a2e;">${task.name}</span>
-        <span style="font-size:10px;color:#bbb;">${task.intervalDays}日</span>
+        <span style="font-size:10px;color:#bbb;">${subLabel}</span>
       </div>
       <div style="margin-top:3px;background:#F0F0F0;border-radius:99px;height:3px;">
-        <div style="width:${progress*100}%;background:${doneToday?"#4CAF50":cfg.bar};height:100%;border-radius:99px;"></div>
+        <div style="width:${progressPct}%;background:${doneToday?"#4CAF50":cfg.bar};height:100%;border-radius:99px;"></div>
       </div>
       <div style="margin-top:3px;font-size:10px;color:${doneToday?"#2E7D32":cfg.text};">
-        ${doneToday?"今日実施済み ✓":days===null?"未実施":daysLeft>0?`${days}日前（あと${daysLeft}日）`:`${days}日前（${-daysLeft}日超過）`}
-        ${last&&!doneToday?`<span style="color:#bbb;margin-left:5px;">${fmtDate(last)}</span>`:""}
+        ${labelMain}
+        ${labelSub&&!doneToday?`<span style="color:#bbb;margin-left:5px;">${labelSub}</span>`:""}
       </div>
     </div>
     ${doneToday?`<button onclick="handleUndo('${task.id}')" style="flex-shrink:0;padding:5px 8px;border-radius:8px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:10px;cursor:pointer;font-family:inherit;font-weight:600;white-space:nowrap;">取消</button>`:""}
@@ -636,13 +694,9 @@ function renderTaskRow(task, groupId, ti, totalTasks) {
 }
 
 function renderTaskCard(task, groupId, ti, totalTasks) {
-  const last = lastDone(task);
-  const days = daysSince(last);
-  const status = getStatus(days, task.intervalDays);
-  const cfg = STATUS[status];
-  const progress = days===null?0:Math.min(days/task.intervalDays,1);
-  const daysLeft = days===null?null:task.intervalDays-days;
-  const doneToday = last===today();
+  const di = getTaskDisplayInfo(task);
+  const { cfg, progressPct, labelMain, doneToday } = di;
+  const subLabel = task.type === 'dates' ? '📅特定日' : task.intervalDays + '日ごと';
   return `
   <div style="background:#fff;border-radius:12px;padding:10px;box-shadow:0 1px 8px rgba(0,0,0,0.07);display:flex;flex-direction:column;gap:6px;">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:4px;">
@@ -658,12 +712,12 @@ function renderTaskCard(task, groupId, ti, totalTasks) {
     </div>
     <div onclick="openChart('${task.id}')" style="cursor:pointer;flex:1;">
       <div style="font-size:12px;font-weight:600;color:#1a1a2e;line-height:1.3;">${task.name}</div>
-      <div style="font-size:10px;color:#bbb;margin-top:1px;">${task.intervalDays}日ごと</div>
+      <div style="font-size:10px;color:#bbb;margin-top:1px;">${subLabel}</div>
       <div style="margin-top:5px;background:#F0F0F0;border-radius:99px;height:3px;">
-        <div style="width:${progress*100}%;background:${doneToday?"#4CAF50":cfg.bar};height:100%;border-radius:99px;"></div>
+        <div style="width:${progressPct}%;background:${doneToday?"#4CAF50":cfg.bar};height:100%;border-radius:99px;"></div>
       </div>
       <div style="margin-top:3px;font-size:10px;color:${doneToday?"#2E7D32":cfg.text};line-height:1.3;">
-        ${doneToday?"今日実施済み ✓":days===null?"未実施":daysLeft>0?`あと${daysLeft}日`:`${-daysLeft}日超過`}
+        ${labelMain}
       </div>
     </div>
     <div style="display:flex;gap:4px;">
@@ -749,14 +803,46 @@ function renderChartScreen() {
 }
 
 // ── モーダル ──
+// タスクモーダルのタブ付きコンテンツを生成
+function renderTaskModalContent(isEdit) {
+  const tab = formData.taskTab || 'interval';
+  const tabBtn = (id, label) => `<button onclick="formData.taskTab='${id}';render()" style="flex:1;padding:7px 4px;border-radius:8px;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;background:${tab===id?'#5C6BC0':'#F0F0F0'};color:${tab===id?'#fff':'#888'};">${label}</button>`;
+  const tabs = `<div style="display:flex;gap:4px;margin-bottom:16px;">${tabBtn('interval','🔁 日数ごと')}${tabBtn('dates','📅 特定日')}</div>`;
+
+  let typeContent = '';
+  if (tab === 'interval') {
+    typeContent = inputField('目安間隔（日数）','intervalDays','number','7');
+  } else {
+    // 特定日：deadlinesをカンマ区切り文字列で編集
+    const dlVal = (formData.deadlinesStr !== undefined)
+      ? formData.deadlinesStr
+      : (formData.deadlines || []).join(', ');
+    typeContent = `
+    <div style="margin-bottom:14px;">
+      <div style="font-size:12px;color:#888;margin-bottom:4px;font-weight:600;">期限日（カンマ区切り）</div>
+      <input type="text" placeholder="例: 03-01, 06-01, 09-01" value="${dlVal.replace(/"/g,'&quot;')}"
+        oninput="formData.deadlinesStr=this.value"
+        style="width:100%;padding:11px 14px;border-radius:10px;border:1.5px solid #E0E0E0;font-size:15px;font-family:inherit;outline:none;box-sizing:border-box;">
+      <div style="font-size:11px;color:#AAA;margin-top:6px;line-height:1.6;">
+        ・毎年繰り返し：<b>MM-DD</b>形式　例: 03-01<br>
+        ・一度きり：<b>YYYY-MM-DD</b>形式　例: 2026-08-01<br>
+        ・複数ある場合はカンマで区切る
+      </div>
+    </div>`;
+  }
+  const btnLabel = isEdit ? '保存する' : '追加する';
+  const deleteBtn = isEdit ? `<button onclick="deleteItem()" style="width:100%;padding:12px;margin-top:10px;border-radius:12px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:14px;cursor:pointer;font-family:inherit;">このタスクを削除</button>` : '';
+  return inputField('タスク名','name','text','例：トイレ掃除') + inputField('アイコン（絵文字1文字）','icon','text','🚽') + tabs + typeContent + `<button onclick="submitModal()" style="${pBtn()}">${btnLabel}</button>` + deleteBtn;
+}
+
 function renderModal() {
   let content = "", title = "";
   if (modalType==="addTask") {
     title="タスクを追加";
-    content=inputField("タスク名","name","text","例：トイレ掃除")+inputField("アイコン（絵文字1文字）","icon","text","🚽")+inputField("目安間隔（日数）","intervalDays","number","7")+`<button onclick="submitModal()" style="${pBtn()}">追加する</button>`;
+    content = renderTaskModalContent(false);
   } else if (modalType==="editTask") {
     title="タスクを編集";
-    content=inputField("タスク名","name","text","")+inputField("アイコン（絵文字1文字）","icon","text","")+inputField("目安間隔（日数）","intervalDays","number","")+`<button onclick="submitModal()" style="${pBtn()}">保存する</button><button onclick="deleteItem()" style="width:100%;padding:12px;margin-top:10px;border-radius:12px;border:1.5px solid #FFCDD2;background:#FFF5F5;color:#E53935;font-size:14px;cursor:pointer;font-family:inherit;">このタスクを削除</button>`;
+    content = renderTaskModalContent(true);
   } else if (modalType==="addGroup") {
     title="グループを追加";
     content=inputField("グループ名","name","text","例：室内")+inputField("アイコン（絵文字1文字）","icon","text","🏠")+`<button onclick="submitModal()" style="${pBtn()}">追加する</button>`;
@@ -838,9 +924,19 @@ function closeChart() {
 
 function openModal(type,id) {
   showMenu=false; modalType=type; formData={};
-  if (type==="editTask") { const t=findTask(id); if(t) formData={id:t.id,name:t.name,icon:t.icon,intervalDays:String(t.intervalDays)}; }
+  if (type==="editTask") {
+    const t=findTask(id);
+    if(t) {
+      const isDate = t.type === 'dates';
+      formData={id:t.id,name:t.name,icon:t.icon,
+        intervalDays:String(t.intervalDays||7),
+        taskTab: isDate ? 'dates' : 'interval',
+        deadlines: t.deadlines || [],
+        deadlinesStr: (t.deadlines||[]).join(', ')};
+    }
+  }
   else if (type==="editGroup") { const g=findGroup(id); if(g) formData={id:g.id,name:g.name,icon:g.icon}; }
-  else if (type==="addTask") { formData={groupId:id,name:"",icon:"",intervalDays:"7"}; }
+  else if (type==="addTask") { formData={groupId:id,name:"",icon:"",intervalDays:"7",taskTab:'interval',deadlines:[],deadlinesStr:''}; }
   render();
 }
 function closeModal() { modalType=null; formData={}; render(); }
@@ -850,10 +946,21 @@ function submitModal() {
   const now = new Date().toISOString();
   if (modalType==="addTask") {
     if (!formData.name||!formData.name.trim()) return;
-    const t={id:uid(),name:formData.name.trim(),icon:formData.icon||"📋",intervalDays:parseInt(formData.intervalDays)||7,history:[],updatedAt:now};
+    const isDate = (formData.taskTab === 'dates');
+    const deadlines = isDate ? (formData.deadlinesStr||'').split(',').map(s=>s.trim()).filter(Boolean) : [];
+    const t = isDate
+      ? {id:uid(),name:formData.name.trim(),icon:formData.icon||'📅',type:'dates',deadlines,history:[],updatedAt:now}
+      : {id:uid(),name:formData.name.trim(),icon:formData.icon||'📋',type:'interval',intervalDays:parseInt(formData.intervalDays)||7,history:[],updatedAt:now};
     groups=groups.map(g=>g.id===formData.groupId?{...g,tasks:[...g.tasks,t]}:g);
   } else if (modalType==="editTask") {
-    groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>t.id===formData.id?{...t,name:formData.name,icon:formData.icon,intervalDays:parseInt(formData.intervalDays)||7,updatedAt:now}:t)}));
+    const isDate = (formData.taskTab === 'dates');
+    const deadlines = isDate ? (formData.deadlinesStr||'').split(',').map(s=>s.trim()).filter(Boolean) : [];
+    groups=groups.map(g=>({...g,tasks:g.tasks.map(t=>{
+      if(t.id!==formData.id) return t;
+      return isDate
+        ? {...t,name:formData.name,icon:formData.icon,type:'dates',deadlines,updatedAt:now}
+        : {...t,name:formData.name,icon:formData.icon,type:'interval',intervalDays:parseInt(formData.intervalDays)||7,updatedAt:now};
+    })}));
   } else if (modalType==="addGroup") {
     if (!formData.name||!formData.name.trim()) return;
     groups=[...groups,{id:uid(),name:formData.name.trim(),icon:formData.icon||"📁",tasks:[]}];
